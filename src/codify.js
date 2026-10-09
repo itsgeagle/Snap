@@ -26,10 +26,10 @@
 
 */
 
-/*global Morph, AlignmentMorph, PushButtonMorph,
+/*global Morph, PushButtonMorph,
 ScrollFrameMorph, TextMorph, StringMorph, MenuMorph, Point,
-Color, HandleMorph, StageMorph, BlockMorph, HatBlockMorph, localize,
-MorphicPreferences, WHITE, SymbolMorph, modules, saveAs*/
+Color, StageMorph, BlockMorph, HatBlockMorph, localize,
+MorphicPreferences, WHITE, ZERO, SymbolMorph, modules, saveAs*/
 
 /*jshint esversion: 11*/
 
@@ -847,7 +847,7 @@ CodePaneMorph.prototype = new Morph();
 CodePaneMorph.prototype.constructor = CodePaneMorph;
 CodePaneMorph.uber = Morph.prototype;
 
-CodePaneMorph.prototype.defaultWidth = 340;
+CodePaneMorph.prototype.defaultWidth = 420;
 
 function CodePaneMorph(ide) {
     this.init(ide);
@@ -858,19 +858,22 @@ CodePaneMorph.prototype.init = function (ide) {
     this.ide = ide;
     this.color = ide ? ide.groupColor : new Color(40, 40, 40);
     this.cachedCode = '';
-    this.pollEvery = 0.35; // seconds
-    this.fps = 4;
+    this.fps = 2;
     this.build();
 };
 
 CodePaneMorph.prototype.styleButton = function (btn, colors, labelColor) {
+    // Match Snap control-bar buttons: no white label shadow (avoids "double text").
     btn.corner = 8;
-    btn.padding = 2;
+    btn.padding = 1;
     btn.color = colors[0];
     btn.highlightColor = colors[1];
     btn.pressColor = colors[2];
     btn.labelColor = labelColor;
+    btn.labelShadowColor = colors[0].darker(40);
+    btn.labelShadowOffset = ZERO;
     btn.contrast = 30;
+    btn.createLabel();
     btn.fixLayout();
     return btn;
 };
@@ -897,6 +900,8 @@ CodePaneMorph.prototype.build = function () {
             ide.frameColor.darker(40)
         ],
         labelColor = ide.isBright ? new Color(40, 40, 40) : WHITE,
+        textColor = ide.isBright ?
+            new Color(30, 30, 30) : new Color(210, 230, 210),
         btn;
 
     this.children.slice().forEach(child => child.destroy());
@@ -913,7 +918,7 @@ CodePaneMorph.prototype.build = function () {
         true,
         false,
         false,
-        null,
+        ZERO,
         null,
         labelColor
     );
@@ -926,7 +931,7 @@ CodePaneMorph.prototype.build = function () {
         null,
         localize('choose output language')
     );
-    btn.labelMinExtent = new Point(72, 18);
+    btn.labelMinExtent = new Point(64, 18);
     this.langButton = this.styleButton(btn, colors, labelColor);
     this.header.add(btn);
 
@@ -938,7 +943,7 @@ CodePaneMorph.prototype.build = function () {
         null,
         localize('toggle current sprite / all sprites')
     );
-    btn.labelMinExtent = new Point(80, 18);
+    btn.labelMinExtent = new Point(72, 18);
     this.scopeButton = this.styleButton(btn, colors, labelColor);
     this.header.add(btn);
 
@@ -972,35 +977,34 @@ CodePaneMorph.prototype.build = function () {
     this.closeButton = this.styleButton(btn, colors, labelColor);
     this.header.add(btn);
 
-    // Code body
+    // Code body — TextMorph color is a property, not a constructor arg
     this.codeBody = new TextMorph(
         SnapCodifier.currentMeta().empty,
         12,
         'monospace',
         false,
         false,
-        false,
-        null,
-        null,
-        ide.isBright ? new Color(30, 30, 30) : new Color(210, 230, 210)
+        'left',
+        0,
+        'monospace'
     );
+    this.codeBody.color = textColor;
     this.codeBody.isEditable = false;
     this.codeBody.enableSelecting();
     this.codeBody.maxWidth = 0;
+    this.codeBody.fixLayout();
 
     // ScrollFrameMorph expects a FrameMorph as contents; add the text into it.
     this.scroller = new ScrollFrameMorph(null, null, ide.sliderColor);
     this.scroller.color = ide.isBright ?
-        new Color(250, 250, 252) : new Color(24, 28, 24);
+        new Color(250, 250, 252) : new Color(22, 26, 22);
     this.scroller.acceptsDrops = false;
     this.scroller.contents.acceptsDrops = false;
+    this.scroller.contents.color = this.scroller.color;
     this.scroller.isTextLineWrapping = true;
-    this.scroller.padding = 4;
+    this.scroller.padding = 6;
     this.scroller.setContents(this.codeBody);
     this.add(this.scroller);
-
-    // Resize handle (bottom-right of pane)
-    this.resizer = new HandleMorph(this, 220, 120, 0, 0);
 };
 
 CodePaneMorph.prototype.chooseLanguage = function () {
@@ -1093,10 +1097,9 @@ CodePaneMorph.prototype.refresh = function (force) {
     this.cachedCode = code;
     this.codeBody.text = code;
     this.codeBody.fixLayout();
-    this.codeBody.changed();
+    this.codeBody.rerender();
     this.scroller.contents.adjustBounds();
     this.scroller.adjustScrollBars();
-    this.refreshButtonLabels();
 };
 
 CodePaneMorph.prototype.step = function () {
@@ -1105,54 +1108,68 @@ CodePaneMorph.prototype.step = function () {
 };
 
 CodePaneMorph.prototype.fixLayout = function () {
-    var pad = 6,
-        headerH = 30,
+    var pad = 8,
+        rowH = 26,
+        headerH = rowH * 2 + 10,
         x = this.left() + pad,
         y = this.top() + pad,
-        innerW = Math.max(40, this.width() - pad * 2),
+        innerW = Math.max(80, this.width() - pad * 2),
         innerH,
-        cursorX;
+        row1Y,
+        row2Y,
+        cursorX,
+        gap = 4;
 
     if (!this.header || !this.scroller || !this.codeBody) { return; }
 
     this.header.setPosition(new Point(x, y));
     this.header.setExtent(new Point(innerW, headerH));
 
-    cursorX = this.header.left() + 4;
-    this.title.setCenter(this.header.center());
-    this.title.setLeft(cursorX);
-    cursorX = this.title.right() + 8;
+    row1Y = this.header.top() + 4;
+    row2Y = this.header.top() + rowH + 6;
 
+    // Row 1: title + close
+    this.title.setTop(row1Y + 4);
+    this.title.setLeft(this.header.left() + 6);
+    if (this.closeButton) {
+        this.closeButton.setTop(row1Y);
+        this.closeButton.setRight(this.header.right() - 4);
+    }
+
+    // Row 2: language, scope, copy, export
+    cursorX = this.header.left() + 4;
     [this.langButton, this.scopeButton, this.copyButton, this.exportButton]
         .forEach(button => {
             if (!button) { return; }
-            button.setCenter(this.header.center());
+            button.setTop(row2Y);
             button.setLeft(cursorX);
-            cursorX = button.right() + 4;
+            cursorX = button.right() + gap;
         });
-
-    if (this.closeButton) {
-        this.closeButton.setCenter(this.header.center());
-        this.closeButton.setRight(this.header.right() - 4);
-    }
 
     y = this.header.bottom() + pad;
     innerH = Math.max(40, this.bottom() - y - pad);
     this.scroller.setPosition(new Point(x, y));
     this.scroller.setExtent(new Point(innerW, innerH));
     this.codeBody.maxWidth = Math.max(
-        40,
-        innerW - MorphicPreferences.scrollBarSize - 8
+        60,
+        innerW - MorphicPreferences.scrollBarSize - 16
+    );
+    this.codeBody.setPosition(
+        this.scroller.position().add(new Point(this.scroller.padding, this.scroller.padding))
     );
     this.codeBody.fixLayout();
+    this.codeBody.rerender();
     this.scroller.contents.adjustBounds();
     this.scroller.adjustScrollBars();
 };
 
 CodePaneMorph.prototype.setExtent = function (point) {
-    CodePaneMorph.uber.setExtent.call(this, point);
+    // Keep a usable minimum width so the pane never looks "squished"
+    var w = Math.max(300, point.x),
+        h = Math.max(120, point.y);
+    CodePaneMorph.uber.setExtent.call(this, new Point(w, h));
     this.fixLayout();
-    if (this.ide && this.width() >= 220) {
+    if (this.ide) {
         this.ide.codePaneWidth = this.width();
     }
 };
