@@ -81,7 +81,7 @@ BlockRemovalDialogMorph,TableMorph, isSnapObject, isRetinaEnabled, SliderMorph,
 disableRetinaSupport, enableRetinaSupport, isRetinaSupported, MediaRecorder,
 Animation, BoxMorph, BlockDialogMorph, RingMorph, Project, ZERO, BLACK, CLEAR,
 BlockVisibilityDialogMorph, ThreadManager, isString, SnapExtensions, snapEquals,
-HatBlockMorph, ZOOM*/
+HatBlockMorph, ZOOM, CodePaneMorph, SnapCodifier*/
 
 /*jshint esversion: 11*/
 
@@ -347,6 +347,10 @@ IDE_Morph.prototype.init = function (config) {
     this.corralBar = null;
     this.corral = null;
     this.zoomBar = null;
+
+    this.codePane = null;
+    this.isCodePaneOpen = false;
+    this.codePaneWidth = 340;
 
     this.embedPlayButton = null;
     this.embedOverlay = null;
@@ -1051,9 +1055,25 @@ IDE_Morph.prototype.buildPanes = function () {
     this.createStage();
     this.createSpriteBar();
     this.createSpriteEditor();
+    this.createCodePane();
     this.createCorralBar();
     this.createCorral();
     this.createZoomBar();
+};
+
+IDE_Morph.prototype.createCodePane = function () {
+    if (this.codePane) {
+        this.codePane.destroy();
+    }
+    this.codePane = new CodePaneMorph(this);
+    this.codePane.setWidth(this.codePaneWidth);
+    this.add(this.codePane);
+    if (this.isCodePaneOpen) {
+        this.codePane.show();
+        this.codePane.refresh(true);
+    } else {
+        this.codePane.hide();
+    }
 };
 
 IDE_Morph.prototype.createLogo = function () {
@@ -1542,7 +1562,36 @@ IDE_Morph.prototype.createControlBar = function () {
     this.controlBar.add(cloudButton);
     this.controlBar.cloudButton = cloudButton; // for menu positioning & refresh
 
+    // live code pane toggle
+    button = new ToggleButtonMorph(
+        null,
+        this,
+        'toggleCodePane',
+        [
+            new SymbolMorph('notes', 13),
+            new SymbolMorph('notes', 13)
+        ],
+        () => this.isCodePaneOpen
+    );
+    button.hasNeutralBackground = true;
+    button.corner = 12;
+    button.color = colors[0];
+    button.highlightColor = colors[1];
+    button.pressColor = new Color(80, 160, 110);
+    button.labelMinExtent = new Point(36, 18);
+    button.padding = 0;
+    button.labelShadowOffset = new Point(-1, -1);
+    button.labelShadowColor = colors[1];
+    button.labelColor = this.buttonLabelColor;
+    button.contrast = this.buttonContrast;
+    button.hint = 'live code view\n(Python & more)';
+    button.fixLayout();
+    button.refresh();
+    this.controlBar.add(button);
+    this.controlBar.codePaneButton = button;
+
     this.controlBar.fixLayout = function () {
+        var codePaneButton = myself.controlBar.codePaneButton;
         x = this.right() - padding;
         [stopButton, pauseButton, startButton].forEach(button => {
                 button.setCenter(myself.controlBar.center());
@@ -1611,6 +1660,12 @@ IDE_Morph.prototype.createControlBar = function () {
             cloudButton.setCenter(myself.controlBar.center());
             cloudButton.setRight(settingsButton.left() - padding);
             projectButton.setRight(cloudButton.left() - padding);
+        }
+
+        if (codePaneButton) {
+            codePaneButton.setCenter(myself.controlBar.center());
+            codePaneButton.setRight(projectButton.left() - padding);
+            codePaneButton.refresh();
         }
 
         this.refreshSlider();
@@ -2963,6 +3018,23 @@ IDE_Morph.prototype.fixLayout = function (situation) {
             this.paletteHandle.fixLayout();
         }
 
+        // live code pane — docked between scripts and stage
+        if (this.codePane && this.isCodePaneOpen && !this.isAppMode &&
+                !this.performerMode && !this.isEmbedMode) {
+            this.codePaneWidth = Math.max(220, this.codePaneWidth);
+            this.codePane.show();
+            this.codePane.setWidth(this.codePaneWidth);
+            this.codePane.setTop(this.stage.top());
+            this.codePane.setHeight(
+                this.bottom() - this.codePane.top() - border
+            );
+            this.codePane.setRight(this.stage.left() - padding);
+            this.codePane.fixLayout();
+            this.codePane.refresh(false);
+        } else if (this.codePane) {
+            this.codePane.hide();
+        }
+
         // spriteBar
         this.spriteBar.setLeft(cnf.noPalette ?
             this.left() + border
@@ -2974,7 +3046,12 @@ IDE_Morph.prototype.fixLayout = function (situation) {
                     : this.logo.bottom() + padding
         );
         this.spriteBar.setWidth(
-            Math.max(0, this.stage.left() - padding - this.spriteBar.left())
+            Math.max(
+                0,
+                (this.isCodePaneOpen && this.codePane && this.codePane.isVisible ?
+                    this.codePane.left() : this.stage.left())
+                    - padding - this.spriteBar.left()
+            )
         );
         this.spriteBar.setHeight(
             Math.round(this.logo.height() * 2.6)
@@ -5239,6 +5316,18 @@ IDE_Morph.prototype.projectMenu = function () {
             'Export summary...',
             () => this.exportProjectSummary(),
             'save a summary\nof this project'
+        );
+        menu.addItem(
+            'Export live code...',
+            () => {
+                if (!this.isCodePaneOpen) {
+                    this.toggleCodePane(true);
+                }
+                if (this.codePane) {
+                    this.codePane.exportCode();
+                }
+            },
+            'download the live text translation\nof your scripts (Python, JS, …)'
         );
         if (shiftClicked) {
             menu.addItem(
@@ -7955,6 +8044,28 @@ IDE_Morph.prototype.toggleAppMode = function (appMode) {
     this.setExtent(this.world().extent());
 };
 
+IDE_Morph.prototype.toggleCodePane = function (forceOpen) {
+    if (isNil(forceOpen)) {
+        this.isCodePaneOpen = !this.isCodePaneOpen;
+    } else {
+        this.isCodePaneOpen = !!forceOpen;
+    }
+    if (!this.codePane) {
+        this.createCodePane();
+    }
+    if (this.isCodePaneOpen) {
+        this.codePane.show();
+        this.codePane.refresh(true);
+        this.showMessage(localize('Live code pane open'), 1);
+    } else {
+        this.codePane.hide();
+    }
+    if (this.controlBar && this.controlBar.codePaneButton) {
+        this.controlBar.codePaneButton.refresh();
+    }
+    this.fixLayout();
+};
+
 IDE_Morph.prototype.toggleStageSize = function (isSmall, forcedRatio) {
     var myself = this,
         smallRatio = forcedRatio || 0.5,
@@ -8753,6 +8864,14 @@ IDE_Morph.prototype.projectSettingsMenu = function () {
         StageMorph.prototype.enableCodeMapping,
         'uncheck to disable\nblock to text mapping features',
         'check for block\nto text mapping features',
+        false
+    );
+    menu.addPreference(
+        'Live code pane',
+        () => this.toggleCodePane(),
+        this.isCodePaneOpen,
+        'uncheck to hide the live\nPython / JS / Java / Lua pane',
+        'check to show a live side-by-side\ntext translation of your scripts',
         false
     );
     menu.addPreference(
