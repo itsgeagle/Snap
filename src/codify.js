@@ -3,10 +3,16 @@
     codify.js
 
     Live multi-language code view for Snap!
-    Converts scripts on the current sprite (or all sprites) into
-    Python / JavaScript / Java / Lua as you build.
 
-    written by Cursor Agent for itsgeagle/Snap
+    Converts scripts into Python / JavaScript / Java / Lua as you build.
+    Handles Snap↔text differences that matter for real programs:
+
+      • identifier sanitization (Snap allows spaces in names)
+      • indexing (Snap is 1-based; Python/JS/Java are 0-based; Lua is 1-based)
+      • custom block definitions emitted as functions
+      • nested reporters composed into calls (pass values through)
+
+    written for itsgeagle/Snap
     https://github.com/itsgeagle/Snap
 
     This file is part of Snap!
@@ -29,7 +35,8 @@
 /*global Morph, PushButtonMorph,
 ScrollFrameMorph, TextMorph, StringMorph, MenuMorph, Point,
 Color, StageMorph, BlockMorph, HatBlockMorph, localize,
-MorphicPreferences, WHITE, ZERO, SymbolMorph, modules, saveAs*/
+MorphicPreferences, WHITE, ZERO, SymbolMorph, modules, saveAs,
+InputSlotMorph, TemplateSlotMorph, SpriteMorph, contains, isNil*/
 
 /*jshint esversion: 11*/
 
@@ -41,640 +48,737 @@ var SnapCodifier;
 var CodePaneMorph;
 
 // SnapCodifier ////////////////////////////////////////////////////////
-//
-// Built-in language templates + conversion helpers.
-// Uses Snap's existing mappedCode() infrastructure.
 
 SnapCodifier = {
     language: 'python',
     scope: 'sprite', // 'sprite' | 'all'
+    _identCache: null,
+    _customBackups: null,
+
     languages: {
         python: {
             label: 'Python',
             ext: 'py',
             mime: 'text/x-python',
             comment: '#',
-            empty: '# (no scripts yet — add blocks to see Python here)\n'
+            indexBase: 0, // Snap item 1 → [0]
+            emptyBody: 'pass',
+            boolTrue: 'True',
+            boolFalse: 'False',
+            nullLit: 'None',
+            andOp: 'and',
+            orOp: 'or',
+            notOp: 'not ',
+            empty: '# (no scripts yet — add blocks to see Python here)\n' +
+                '# Custom blocks become def functions; names with spaces are sanitized.\n',
+            reserved: [
+                'False', 'None', 'True', 'and', 'as', 'assert', 'async',
+                'await', 'break', 'class', 'continue', 'def', 'del', 'elif',
+                'else', 'except', 'finally', 'for', 'from', 'global', 'if',
+                'import', 'in', 'is', 'lambda', 'nonlocal', 'not', 'or',
+                'pass', 'raise', 'return', 'try', 'while', 'with', 'yield',
+                'list', 'dict', 'str', 'int', 'float', 'type', 'id', 'input',
+                'print', 'range', 'len', 'map', 'filter', 'sum', 'min', 'max'
+            ]
         },
         javascript: {
             label: 'JavaScript',
             ext: 'js',
             mime: 'text/javascript',
             comment: '//',
-            empty: '// (no scripts yet — add blocks to see JavaScript here)\n'
+            indexBase: 0,
+            emptyBody: '/* empty */',
+            boolTrue: 'true',
+            boolFalse: 'false',
+            nullLit: 'null',
+            andOp: '&&',
+            orOp: '||',
+            notOp: '!',
+            empty: '// (no scripts yet — add blocks to see JavaScript here)\n' +
+                '// Custom blocks become functions; names with spaces are sanitized.\n',
+            reserved: [
+                'break', 'case', 'catch', 'class', 'const', 'continue',
+                'debugger', 'default', 'delete', 'do', 'else', 'export',
+                'extends', 'finally', 'for', 'function', 'if', 'import',
+                'in', 'instanceof', 'let', 'new', 'return', 'super',
+                'switch', 'this', 'throw', 'try', 'typeof', 'var', 'void',
+                'while', 'with', 'yield', 'enum', 'await', 'null', 'true',
+                'false', 'undefined'
+            ]
         },
         java: {
             label: 'Java',
             ext: 'java',
             mime: 'text/x-java-source',
             comment: '//',
-            empty: '// (no scripts yet — add blocks to see Java here)\n'
+            indexBase: 0,
+            emptyBody: '/* empty */',
+            boolTrue: 'true',
+            boolFalse: 'false',
+            nullLit: 'null',
+            andOp: '&&',
+            orOp: '||',
+            notOp: '!',
+            empty: '// (no scripts yet — add blocks to see Java here)\n' +
+                '// Custom blocks become methods; names with spaces are sanitized.\n',
+            reserved: [
+                'abstract', 'assert', 'boolean', 'break', 'byte', 'case',
+                'catch', 'char', 'class', 'const', 'continue', 'default',
+                'do', 'double', 'else', 'enum', 'extends', 'final',
+                'finally', 'float', 'for', 'goto', 'if', 'implements',
+                'import', 'instanceof', 'int', 'interface', 'long',
+                'native', 'new', 'package', 'private', 'protected',
+                'public', 'return', 'short', 'static', 'strictfp',
+                'super', 'switch', 'synchronized', 'this', 'throw',
+                'throws', 'transient', 'try', 'void', 'volatile', 'while',
+                'true', 'false', 'null'
+            ]
         },
         lua: {
             label: 'Lua',
             ext: 'lua',
             mime: 'text/x-lua',
             comment: '--',
-            empty: '-- (no scripts yet — add blocks to see Lua here)\n'
+            indexBase: 1, // same as Snap
+            emptyBody: '-- empty',
+            boolTrue: 'true',
+            boolFalse: 'false',
+            nullLit: 'nil',
+            andOp: 'and',
+            orOp: 'or',
+            notOp: 'not ',
+            empty: '-- (no scripts yet — add blocks to see Lua here)\n' +
+                '-- Custom blocks become functions; names with spaces are sanitized.\n',
+            reserved: [
+                'and', 'break', 'do', 'else', 'elseif', 'end', 'false',
+                'for', 'function', 'goto', 'if', 'in', 'local', 'nil',
+                'not', 'or', 'repeat', 'return', 'then', 'true', 'until',
+                'while'
+            ]
         }
     }
 };
 
-SnapCodifier.templates = {
+SnapCodifier.profile = function () {
+    return this.languages[this.language] || this.languages.python;
+};
 
-    python: {
-        string: '"<#1>"',
-        number: '<#1>',
-        boolTrue: 'True',
-        boolFalse: 'False',
-        reify: '<#1>',
-        delim: ', ',
-        item: '<#1>',
-        list: '[<#1>]',
-        parms_delim: ', ',
-        parms_item: '<#1>',
-        parms_list: '<#1>',
-        tempvars_delim: ', ',
-        tempvars_item: '<#1>',
-        tempvars_list: '<#1>',
+SnapCodifier.currentMeta = function () {
+    return this.profile();
+};
 
-        // Events
-        receiveGo: '# when green flag clicked',
-        receiveKey: '# when <#1> key pressed',
-        receiveInteraction: '# when I am <#1>',
-        receiveMessage: '# when I receive "<#1>"',
-        receiveCondition: '# when <#1>',
-        receiveOnClone: '# when I start as a clone',
+// ---- naming: Snap allows spaces; text languages mostly don't --------
 
-        // Motion
-        forward: 'move(<#1>)',
-        turn: 'turn_right(<#1>)',
-        turnLeft: 'turn_left(<#1>)',
-        setHeading: 'point_in_direction(<#1>)',
-        doFaceTowards: 'point_towards(<#1>)',
-        gotoXY: 'go_to(x=<#1>, y=<#2>)',
-        doGotoObject: 'go_to(<#1>)',
-        doGlide: 'glide(<#1>, x=<#2>, y=<#3>)',
-        changeXPosition: 'change_x(<#1>)',
-        setXPosition: 'set_x(<#1>)',
-        changeYPosition: 'change_y(<#1>)',
-        setYPosition: 'set_y(<#1>)',
-        bounceOffEdge: 'if_on_edge_bounce()',
-        xPosition: 'x_position()',
-        yPosition: 'y_position()',
-        direction: 'direction()',
-        getPosition: 'position()',
+SnapCodifier.ident = function (raw) {
+    var profile = this.profile(),
+        name = (raw === null || raw === undefined) ? '' : String(raw),
+        cacheKey = name + '\0' + this.language,
+        cleaned,
+        out,
+        n,
+        used;
 
-        // Looks
-        doSayFor: 'say(<#1>, <#2>)',
-        bubble: 'say(<#1>)',
-        doThinkFor: 'think(<#1>, <#2>)',
-        doThink: 'think(<#1>)',
-        doSwitchToCostume: 'switch_costume(<#1>)',
-        doWearNextCostume: 'next_costume()',
-        changeEffect: 'change_effect("<#1>", <#2>)',
-        setEffect: 'set_effect("<#1>", <#2>)',
-        clearEffects: 'clear_graphic_effects()',
-        changeScale: 'change_size(<#1>)',
-        setScale: 'set_size(<#1>)',
-        show: 'show()',
-        hide: 'hide()',
-        getScale: 'size()',
-
-        // Sound
-        playSound: 'play_sound(<#1>)',
-        doPlaySoundUntilDone: 'play_sound_until_done(<#1>)',
-        doStopAllSounds: 'stop_all_sounds()',
-        doRest: 'rest(<#1>)',
-        doPlayNote: 'play_note(<#1>, <#2>)',
-        doChangeTempo: 'change_tempo(<#1>)',
-        doSetTempo: 'set_tempo(<#1>)',
-        getTempo: 'tempo()',
-
-        // Pen
-        clear: 'clear()',
-        down: 'pen_down()',
-        up: 'pen_up()',
-        setColor: 'set_pen_color(<#1>)',
-        changeSize: 'change_pen_size(<#1>)',
-        setSize: 'set_pen_size(<#1>)',
-        doStamp: 'stamp()',
-        floodFill: 'fill()',
-
-        // Control
-        doWait: 'wait(<#1>)',
-        doWaitUntil: 'wait_until(<#1>)',
-        doForever: 'while True:\n    <#1>',
-        doRepeat: 'for _ in range(<#1>):\n    <#2>',
-        doUntil: 'while not (<#1>):\n    <#2>',
-        doFor: 'for <#1> in range(<#2>, (<#3>) + 1):\n    <#4>',
-        doIf: 'if <#1>:\n    <#2>',
-        doIfElse: 'if <#1>:\n    <#2>\nelse:\n    <#3>',
-        doReport: 'return <#1>',
-        doStopThis: 'stop()',
-        doStopAll: 'stop_all()',
-        doRun: '<#1>(<#2>)',
-        fork: 'async <#1>(<#2>)',
-        evaluate: '<#1>(<#2>)',
-        doBroadcast: 'broadcast("<#1>")',
-        doBroadcastAndWait: 'broadcast_and_wait("<#1>")',
-        createClone: 'create_clone(<#1>)',
-        removeClone: 'delete_this_clone()',
-        doPauseAll: 'pause_all()',
-
-        // Sensing
-        reportTouchingObject: 'touching(<#1>)',
-        reportTouchingColor: 'touching_color(<#1>)',
-        reportColorIsTouchingColor: 'color_is_touching(<#1>, <#2>)',
-        doAsk: 'ask(<#1>)',
-        reportLastAnswer: 'answer()',
-        getLastAnswer: 'answer()',
-        reportMouseX: 'mouse_x()',
-        reportMouseY: 'mouse_y()',
-        reportMouseDown: 'mouse_down()',
-        reportKeyPressed: 'key_pressed(<#1>)',
-        doResetTimer: 'reset_timer()',
-        reportTimer: 'timer()',
-        getTimer: 'timer()',
-        reportDate: 'current("<#1>")',
-        reportURL: 'http_get(<#1>)',
-
-        // Operators
-        reportSum: '(<#1> + <#2>)',
-        reportDifference: '(<#1> - <#2>)',
-        reportProduct: '(<#1> * <#2>)',
-        reportQuotient: '(<#1> / <#2>)',
-        reportModulus: '(<#1> % <#2>)',
-        reportPower: '(<#1> ** <#2>)',
-        reportRound: 'round(<#1>)',
-        reportMonadic: '<#1>(<#2>)',
-        reportRandom: 'random.randint(<#1>, <#2>)',
-        reportLessThan: '(<#1> < <#2>)',
-        reportEquals: '(<#1> == <#2>)',
-        reportGreaterThan: '(<#1> > <#2>)',
-        reportAnd: '(<#1> and <#2>)',
-        reportOr: '(<#1> or <#2>)',
-        reportNot: '(not <#1>)',
-        reportBoolean: '<#1>',
-        reportTrue: 'True',
-        reportFalse: 'False',
-        reportJoinWords: '"".join([<#1>])',
-        reportTextAttribute: 'len(<#2>)' ,
-        reportLetter: '(<#2>)[<#1> - 1]',
-        reportUnicode: 'ord(<#1>)',
-        reportUnicodeAsLetter: 'chr(<#1>)',
-        reportIsA: 'isinstance(<#1>, <#2>)',
-        reportIsIdentical: '(<#1> is <#2>)',
-        reportTextSplit: '(<#1>).split(<#2>)',
-        reportVariadicSum: '(<#1>)',
-        reportVariadicProduct: '(<#1>)',
-        reportVariadicMin: 'min(<#1>)',
-        reportVariadicMax: 'max(<#1>)',
-        reportVariadicLessThan: '(<#1>)',
-        reportVariadicEquals: '(<#1>)',
-        reportVariadicGreaterThan: '(<#1>)',
-        reportVariadicAnd: '(<#1>)',
-        reportVariadicOr: '(<#1>)',
-
-        // Variables
-        doSetVar: '<#1> = <#2>',
-        doChangeVar: '<#1> += <#2>',
-        doShowVar: 'show_variable("<#1>")',
-        doHideVar: 'hide_variable("<#1>")',
-        doDeclareVariables: '<#1> = None',
-
-        // Lists
-        reportNewList: '[<#1>]',
-        reportCONS: '[<#1>] + list(<#2>)',
-        reportListItem: '(<#2>)[<#1> - 1]',
-        reportCDR: '(<#1>)[1:]',
-        reportListAttribute: 'len(<#1>)',
-        reportListContainsItem: '(<#2> in <#1>)',
-        reportListIsEmpty: '(len(<#1>) == 0)',
-        reportListIndex: '((<#2>).index(<#1>) + 1 if <#1> in <#2> else 0)',
-        doAddToList: '(<#2>).append(<#1>)',
-        doDeleteFromList: '(<#2>).pop(<#1> - 1)',
-        doInsertInList: '(<#3>).insert(<#2> - 1, <#1>)',
-        doReplaceInList: '(<#3>)[<#2> - 1] = <#1>',
-        reportNumbers: 'list(range(<#1>, (<#2>) + 1))',
-        reportConcatenatedLists: '(<#1>)',
-        reportMap: '[<#1>(x) for x in <#2>]',
-        reportKeep: '[x for x in <#2> if <#1>(x)]',
-        reportFindFirst: 'next((x for x in <#2> if <#1>(x)), None)',
-        reportCombine: 'functools.reduce(<#2>, <#1>)',
-        doForEach: 'for <#1> in <#2>:\n    <#3>'
-    },
-
-    javascript: {
-        string: "'<#1>'",
-        number: '<#1>',
-        boolTrue: 'true',
-        boolFalse: 'false',
-        reify: '<#1>',
-        delim: ', ',
-        item: '<#1>',
-        list: '[<#1>]',
-        parms_delim: ', ',
-        parms_item: '<#1>',
-        parms_list: '<#1>',
-        tempvars_delim: ', ',
-        tempvars_item: '<#1>',
-        tempvars_list: '<#1>',
-
-        receiveGo: '// when green flag clicked',
-        receiveKey: '// when <#1> key pressed',
-        receiveInteraction: '// when I am <#1>',
-        receiveMessage: '// when I receive "<#1>"',
-        receiveCondition: '// when <#1>',
-        receiveOnClone: '// when I start as a clone',
-
-        forward: 'move(<#1>);',
-        turn: 'turnRight(<#1>);',
-        turnLeft: 'turnLeft(<#1>);',
-        setHeading: 'pointInDirection(<#1>);',
-        doFaceTowards: 'pointTowards(<#1>);',
-        gotoXY: 'goTo(<#1>, <#2>);',
-        doGotoObject: 'goTo(<#1>);',
-        doGlide: 'glide(<#1>, <#2>, <#3>);',
-        changeXPosition: 'changeX(<#1>);',
-        setXPosition: 'setX(<#1>);',
-        changeYPosition: 'changeY(<#1>);',
-        setYPosition: 'setY(<#1>);',
-        bounceOffEdge: 'ifOnEdgeBounce();',
-        xPosition: 'xPosition()',
-        yPosition: 'yPosition()',
-        direction: 'direction()',
-        getPosition: 'position()',
-
-        doSayFor: 'say(<#1>, <#2>);',
-        bubble: 'say(<#1>);',
-        doThinkFor: 'think(<#1>, <#2>);',
-        doThink: 'think(<#1>);',
-        doSwitchToCostume: 'switchCostume(<#1>);',
-        doWearNextCostume: 'nextCostume();',
-        changeEffect: 'changeEffect("<#1>", <#2>);',
-        setEffect: 'setEffect("<#1>", <#2>);',
-        clearEffects: 'clearGraphicEffects();',
-        changeScale: 'changeSize(<#1>);',
-        setScale: 'setSize(<#1>);',
-        show: 'show();',
-        hide: 'hide();',
-        getScale: 'size()',
-
-        playSound: 'playSound(<#1>);',
-        doPlaySoundUntilDone: 'playSoundUntilDone(<#1>);',
-        doStopAllSounds: 'stopAllSounds();',
-        doRest: 'rest(<#1>);',
-        doPlayNote: 'playNote(<#1>, <#2>);',
-        doChangeTempo: 'changeTempo(<#1>);',
-        doSetTempo: 'setTempo(<#1>);',
-        getTempo: 'tempo()',
-
-        clear: 'clear();',
-        down: 'penDown();',
-        up: 'penUp();',
-        setColor: 'setPenColor(<#1>);',
-        changeSize: 'changePenSize(<#1>);',
-        setSize: 'setPenSize(<#1>);',
-        doStamp: 'stamp();',
-        floodFill: 'fill();',
-
-        doWait: 'await wait(<#1>);',
-        doWaitUntil: 'await waitUntil(() => <#1>);',
-        doForever: 'while (true) {\n    <#1>\n}',
-        doRepeat: 'for (let _i = 0; _i < <#1>; _i++) {\n    <#2>\n}',
-        doUntil: 'while (!(<#1>)) {\n    <#2>\n}',
-        doFor: 'for (let <#1> = <#2>; <#1> <= <#3>; <#1>++) {\n    <#4>\n}',
-        doIf: 'if (<#1>) {\n    <#2>\n}',
-        doIfElse: 'if (<#1>) {\n    <#2>\n} else {\n    <#3>\n}',
-        doReport: 'return <#1>;',
-        doStopThis: 'return;',
-        doStopAll: 'stopAll();',
-        doRun: '<#1>(<#2>);',
-        fork: 'queueMicrotask(() => <#1>(<#2>));',
-        evaluate: '<#1>(<#2>)',
-        doBroadcast: 'broadcast("<#1>");',
-        doBroadcastAndWait: 'await broadcastAndWait("<#1>");',
-        createClone: 'createClone(<#1>);',
-        removeClone: 'deleteThisClone();',
-        doPauseAll: 'pauseAll();',
-
-        reportTouchingObject: 'touching(<#1>)',
-        reportTouchingColor: 'touchingColor(<#1>)',
-        reportColorIsTouchingColor: 'colorIsTouching(<#1>, <#2>)',
-        doAsk: 'await ask(<#1>);',
-        reportLastAnswer: 'answer()',
-        getLastAnswer: 'answer()',
-        reportMouseX: 'mouseX()',
-        reportMouseY: 'mouseY()',
-        reportMouseDown: 'mouseDown()',
-        reportKeyPressed: 'keyPressed(<#1>)',
-        doResetTimer: 'resetTimer();',
-        reportTimer: 'timer()',
-        getTimer: 'timer()',
-        reportDate: 'current("<#1>")',
-        reportURL: 'await httpGet(<#1>)',
-
-        reportSum: '(<#1> + <#2>)',
-        reportDifference: '(<#1> - <#2>)',
-        reportProduct: '(<#1> * <#2>)',
-        reportQuotient: '(<#1> / <#2>)',
-        reportModulus: '(<#1> % <#2>)',
-        reportPower: 'Math.pow(<#1>, <#2>)',
-        reportRound: 'Math.round(<#1>)',
-        reportMonadic: 'Math.<#1>(<#2>)',
-        reportRandom: '(<#1> + Math.floor(Math.random() * ((<#2>) - (<#1>) + 1)))',
-        reportLessThan: '(<#1> < <#2>)',
-        reportEquals: '(<#1> === <#2>)',
-        reportGreaterThan: '(<#1> > <#2>)',
-        reportAnd: '(<#1> && <#2>)',
-        reportOr: '(<#1> || <#2>)',
-        reportNot: '(!(<#1>))',
-        reportBoolean: '<#1>',
-        reportTrue: 'true',
-        reportFalse: 'false',
-        reportJoinWords: '[<#1>].join("")',
-        reportTextAttribute: '(<#2>).length',
-        reportLetter: '(<#2>)[<#1> - 1]',
-        reportUnicode: '(<#1>).charCodeAt(0)',
-        reportUnicodeAsLetter: 'String.fromCharCode(<#1>)',
-        reportIsA: '(typeof <#1> === "<#2>")',
-        reportIsIdentical: '(<#1> === <#2>)',
-        reportTextSplit: '(<#1>).split(<#2>)',
-        reportVariadicSum: '(<#1>)',
-        reportVariadicProduct: '(<#1>)',
-        reportVariadicMin: 'Math.min(<#1>)',
-        reportVariadicMax: 'Math.max(<#1>)',
-        reportVariadicLessThan: '(<#1>)',
-        reportVariadicEquals: '(<#1>)',
-        reportVariadicGreaterThan: '(<#1>)',
-        reportVariadicAnd: '(<#1>)',
-        reportVariadicOr: '(<#1>)',
-
-        doSetVar: '<#1> = <#2>;',
-        doChangeVar: '<#1> += <#2>;',
-        doShowVar: 'showVariable("<#1>");',
-        doHideVar: 'hideVariable("<#1>");',
-        doDeclareVariables: 'let <#1>;',
-
-        reportNewList: '[<#1>]',
-        reportCONS: '[<#1>, ...<#2>]',
-        reportListItem: '(<#2>)[<#1> - 1]',
-        reportCDR: '(<#1>).slice(1)',
-        reportListAttribute: '(<#1>).length',
-        reportListContainsItem: '(<#1>).includes(<#2>)',
-        reportListIsEmpty: '((<#1>).length === 0)',
-        reportListIndex: '((<#2>).indexOf(<#1>) + 1)',
-        doAddToList: '(<#2>).push(<#1>);',
-        doDeleteFromList: '(<#2>).splice(<#1> - 1, 1);',
-        doInsertInList: '(<#3>).splice(<#2> - 1, 0, <#1>);',
-        doReplaceInList: '(<#3>)[<#2> - 1] = <#1>;',
-        reportNumbers: 'Array.from({length: (<#2>) - (<#1>) + 1}, (_, i) => (<#1>) + i)',
-        reportConcatenatedLists: '[].concat(<#1>)',
-        reportMap: '(<#2>).map(<#1>)',
-        reportKeep: '(<#2>).filter(<#1>)',
-        reportFindFirst: '(<#2>).find(<#1>)',
-        reportCombine: '(<#1>).reduce(<#2>)',
-        doForEach: 'for (const <#1> of <#2>) {\n    <#3>\n}'
-    },
-
-    java: {
-        string: '"<#1>"',
-        number: '<#1>',
-        boolTrue: 'true',
-        boolFalse: 'false',
-        reify: '<#1>',
-        delim: ', ',
-        item: '<#1>',
-        list: 'List.of(<#1>)',
-        parms_delim: ', ',
-        parms_item: '<#1>',
-        parms_list: '<#1>',
-        tempvars_delim: ', ',
-        tempvars_item: '<#1>',
-        tempvars_list: '<#1>',
-
-        receiveGo: '// when green flag clicked',
-        receiveKey: '// when <#1> key pressed',
-        receiveInteraction: '// when I am <#1>',
-        receiveMessage: '// when I receive "<#1>"',
-        receiveCondition: '// when <#1>',
-        receiveOnClone: '// when I start as a clone',
-
-        forward: 'move(<#1>);',
-        turn: 'turnRight(<#1>);',
-        turnLeft: 'turnLeft(<#1>);',
-        setHeading: 'pointInDirection(<#1>);',
-        doFaceTowards: 'pointTowards(<#1>);',
-        gotoXY: 'goTo(<#1>, <#2>);',
-        doGotoObject: 'goTo(<#1>);',
-        doGlide: 'glide(<#1>, <#2>, <#3>);',
-        changeXPosition: 'changeX(<#1>);',
-        setXPosition: 'setX(<#1>);',
-        changeYPosition: 'changeY(<#1>);',
-        setYPosition: 'setY(<#1>);',
-        bounceOffEdge: 'ifOnEdgeBounce();',
-        xPosition: 'xPosition()',
-        yPosition: 'yPosition()',
-        direction: 'direction()',
-
-        doSayFor: 'say(<#1>, <#2>);',
-        bubble: 'say(<#1>);',
-        doThinkFor: 'think(<#1>, <#2>);',
-        doThink: 'think(<#1>);',
-        show: 'show();',
-        hide: 'hide();',
-
-        clear: 'clear();',
-        down: 'penDown();',
-        up: 'penUp();',
-        doStamp: 'stamp();',
-
-        doWait: 'wait(<#1>);',
-        doWaitUntil: 'waitUntil(<#1>);',
-        doForever: 'while (true) {\n    <#1>\n}',
-        doRepeat: 'for (int _i = 0; _i < <#1>; _i++) {\n    <#2>\n}',
-        doUntil: 'while (!(<#1>)) {\n    <#2>\n}',
-        doFor: 'for (int <#1> = <#2>; <#1> <= <#3>; <#1>++) {\n    <#4>\n}',
-        doIf: 'if (<#1>) {\n    <#2>\n}',
-        doIfElse: 'if (<#1>) {\n    <#2>\n} else {\n    <#3>\n}',
-        doReport: 'return <#1>;',
-        doStopThis: 'return;',
-        doBroadcast: 'broadcast("<#1>");',
-        doBroadcastAndWait: 'broadcastAndWait("<#1>");',
-
-        reportMouseX: 'mouseX()',
-        reportMouseY: 'mouseY()',
-        reportMouseDown: 'mouseDown()',
-        reportKeyPressed: 'keyPressed(<#1>)',
-        reportTimer: 'timer()',
-        getTimer: 'timer()',
-
-        reportSum: '(<#1> + <#2>)',
-        reportDifference: '(<#1> - <#2>)',
-        reportProduct: '(<#1> * <#2>)',
-        reportQuotient: '(<#1> / <#2>)',
-        reportModulus: '(<#1> % <#2>)',
-        reportPower: 'Math.pow(<#1>, <#2>)',
-        reportRound: 'Math.round(<#1>)',
-        reportRandom: '(<#1> + (int)(Math.random() * ((<#2>) - (<#1>) + 1)))',
-        reportLessThan: '(<#1> < <#2>)',
-        reportEquals: '(<#1> == <#2>)',
-        reportGreaterThan: '(<#1> > <#2>)',
-        reportAnd: '(<#1> && <#2>)',
-        reportOr: '(<#1> || <#2>)',
-        reportNot: '(!(<#1>))',
-        reportBoolean: '<#1>',
-        reportTrue: 'true',
-        reportFalse: 'false',
-        reportJoinWords: 'String.join("", <#1>)',
-        reportTextAttribute: '(<#2>).length()',
-        reportLetter: 'String.valueOf((<#2>).charAt(<#1> - 1))',
-        reportVariadicSum: '(<#1>)',
-        reportVariadicProduct: '(<#1>)',
-        reportVariadicLessThan: '(<#1>)',
-        reportVariadicEquals: '(<#1>)',
-        reportVariadicGreaterThan: '(<#1>)',
-        reportVariadicAnd: '(<#1>)',
-        reportVariadicOr: '(<#1>)',
-
-        doSetVar: '<#1> = <#2>;',
-        doChangeVar: '<#1> += <#2>;',
-        doDeclareVariables: 'Object <#1> = null;',
-
-        reportNewList: 'new ArrayList<>(List.of(<#1>))',
-        reportListItem: '(<#2>).get(<#1> - 1)',
-        reportListAttribute: '(<#1>).size()',
-        reportListContainsItem: '(<#1>).contains(<#2>)',
-        reportListIsEmpty: '(<#1>).isEmpty()',
-        doAddToList: '(<#2>).add(<#1>);',
-        doDeleteFromList: '(<#2>).remove(<#1> - 1);',
-        doInsertInList: '(<#3>).add(<#2> - 1, <#1>);',
-        doReplaceInList: '(<#3>).set(<#2> - 1, <#1>);',
-        doForEach: 'for (Object <#1> : <#2>) {\n    <#3>\n}'
-    },
-
-    lua: {
-        string: '"<#1>"',
-        number: '<#1>',
-        boolTrue: 'true',
-        boolFalse: 'false',
-        reify: '<#1>',
-        delim: ', ',
-        item: '<#1>',
-        list: '{<#1>}',
-        parms_delim: ', ',
-        parms_item: '<#1>',
-        parms_list: '<#1>',
-        tempvars_delim: ', ',
-        tempvars_item: '<#1>',
-        tempvars_list: '<#1>',
-
-        receiveGo: '-- when green flag clicked',
-        receiveKey: '-- when <#1> key pressed',
-        receiveInteraction: '-- when I am <#1>',
-        receiveMessage: '-- when I receive "<#1>"',
-        receiveCondition: '-- when <#1>',
-        receiveOnClone: '-- when I start as a clone',
-
-        forward: 'move(<#1>)',
-        turn: 'turn_right(<#1>)',
-        turnLeft: 'turn_left(<#1>)',
-        setHeading: 'point_in_direction(<#1>)',
-        doFaceTowards: 'point_towards(<#1>)',
-        gotoXY: 'go_to(<#1>, <#2>)',
-        doGotoObject: 'go_to(<#1>)',
-        doGlide: 'glide(<#1>, <#2>, <#3>)',
-        changeXPosition: 'change_x(<#1>)',
-        setXPosition: 'set_x(<#1>)',
-        changeYPosition: 'change_y(<#1>)',
-        setYPosition: 'set_y(<#1>)',
-        bounceOffEdge: 'if_on_edge_bounce()',
-        xPosition: 'x_position()',
-        yPosition: 'y_position()',
-        direction: 'direction()',
-
-        doSayFor: 'say(<#1>, <#2>)',
-        bubble: 'say(<#1>)',
-        doThinkFor: 'think(<#1>, <#2>)',
-        doThink: 'think(<#1>)',
-        show: 'show()',
-        hide: 'hide()',
-
-        clear: 'clear()',
-        down: 'pen_down()',
-        up: 'pen_up()',
-        doStamp: 'stamp()',
-
-        doWait: 'wait(<#1>)',
-        doWaitUntil: 'wait_until(function() return <#1> end)',
-        doForever: 'while true do\n    <#1>\nend',
-        doRepeat: 'for _ = 1, <#1> do\n    <#2>\nend',
-        doUntil: 'while not (<#1>) do\n    <#2>\nend',
-        doFor: 'for <#1> = <#2>, <#3> do\n    <#4>\nend',
-        doIf: 'if <#1> then\n    <#2>\nend',
-        doIfElse: 'if <#1> then\n    <#2>\nelse\n    <#3>\nend',
-        doReport: 'return <#1>',
-        doStopThis: 'return',
-        doBroadcast: 'broadcast("<#1>")',
-        doBroadcastAndWait: 'broadcast_and_wait("<#1>")',
-
-        reportMouseX: 'mouse_x()',
-        reportMouseY: 'mouse_y()',
-        reportMouseDown: 'mouse_down()',
-        reportKeyPressed: 'key_pressed(<#1>)',
-        reportTimer: 'timer()',
-        getTimer: 'timer()',
-
-        reportSum: '(<#1> + <#2>)',
-        reportDifference: '(<#1> - <#2>)',
-        reportProduct: '(<#1> * <#2>)',
-        reportQuotient: '(<#1> / <#2>)',
-        reportModulus: '(<#1> % <#2>)',
-        reportPower: '(<#1> ^ <#2>)',
-        reportRound: 'math.floor(<#1> + 0.5)',
-        reportRandom: 'math.random(<#1>, <#2>)',
-        reportLessThan: '(<#1> < <#2>)',
-        reportEquals: '(<#1> == <#2>)',
-        reportGreaterThan: '(<#1> > <#2>)',
-        reportAnd: '(<#1> and <#2>)',
-        reportOr: '(<#1> or <#2>)',
-        reportNot: '(not <#1>)',
-        reportBoolean: '<#1>',
-        reportTrue: 'true',
-        reportFalse: 'false',
-        reportJoinWords: 'table.concat({<#1>})',
-        reportTextAttribute: '(#<#2>)',
-        reportLetter: 'string.sub(<#2>, <#1>, <#1>)',
-        reportVariadicSum: '(<#1>)',
-        reportVariadicProduct: '(<#1>)',
-        reportVariadicLessThan: '(<#1>)',
-        reportVariadicEquals: '(<#1>)',
-        reportVariadicGreaterThan: '(<#1>)',
-        reportVariadicAnd: '(<#1>)',
-        reportVariadicOr: '(<#1>)',
-
-        doSetVar: '<#1> = <#2>',
-        doChangeVar: '<#1> = <#1> + <#2>',
-        doDeclareVariables: 'local <#1>',
-
-        reportNewList: '{<#1>}',
-        reportListItem: '(<#2>)[<#1>]',
-        reportListAttribute: '(#<#1>)',
-        reportListContainsItem: 'table_contains(<#1>, <#2>)',
-        reportListIsEmpty: '(#<#1> == 0)',
-        doAddToList: 'table.insert(<#2>, <#1>)',
-        doDeleteFromList: 'table.remove(<#2>, <#1>)',
-        doInsertInList: 'table.insert(<#3>, <#2>, <#1>)',
-        doReplaceInList: '(<#3>)[<#2>] = <#1>',
-        doForEach: 'for _, <#1> in ipairs(<#2>) do\n    <#3>\nend'
+    if (!this._identCache) { this._identCache = {}; }
+    if (Object.prototype.hasOwnProperty.call(this._identCache, cacheKey)) {
+        return this._identCache[cacheKey];
     }
+
+    cleaned = name
+        .replace(/['"]/g, '')
+        .replace(/[^A-Za-z0-9_]+/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_|_$/g, '');
+
+    if (!cleaned) {
+        cleaned = 'value';
+    }
+    if (/^[0-9]/.test(cleaned)) {
+        cleaned = 'n_' + cleaned;
+    }
+    if (profile.reserved.indexOf(cleaned) !== -1 ||
+            profile.reserved.indexOf(cleaned.toLowerCase()) !== -1) {
+        cleaned = cleaned + '_';
+    }
+
+    // Stable per original name; disambiguate distinct Snap names that collide
+    used = {};
+    Object.keys(this._identCache).forEach(key => {
+        if (key.endsWith('\0' + this.language)) {
+            used[this._identCache[key]] = true;
+        }
+    });
+    out = cleaned;
+    n = 2;
+    while (used[out]) {
+        out = cleaned + '_' + n;
+        n += 1;
+    }
+    this._identCache[cacheKey] = out;
+    return out;
+};
+
+SnapCodifier.specToFunctionName = function (spec) {
+    // "foo %n bar %'my list'" → foo_bar
+    var words = String(spec || 'custom_block')
+        .replace(/%'?[^%\s']+'?/g, ' ')
+        .replace(/\$\w+/g, ' ')
+        .replace(/[^A-Za-z0-9_]+/g, ' ')
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean);
+    if (!words.length) { words = ['custom_block']; }
+    return this.ident(words.join('_'));
+};
+
+SnapCodifier.inputNamesOf = function (definition) {
+    var names = [];
+    if (!definition) { return names; }
+    if (typeof definition.inputNames === 'function') {
+        names = definition.inputNames();
+    }
+    // Prefer declaration keys when present (may include spaces)
+    if (definition.declarations && definition.declarations.size) {
+        names = Array.from(definition.declarations.keys());
+    }
+    return names.map(n => this.ident(n));
+};
+
+// ---- indexing helpers (Snap is always 1-based) ----------------------
+
+SnapCodifier.indexAccess = function (collection, indexExpr) {
+    // Read item / letter at Snap index
+    if (this.profile().indexBase === 0) {
+        return '(' + collection + ')[(' + indexExpr + ') - 1]';
+    }
+    return '(' + collection + ')[' + indexExpr + ']';
+};
+
+SnapCodifier.indexAssign = function (collection, indexExpr, valueExpr) {
+    if (this.profile().indexBase === 0) {
+        return '(' + collection + ')[(' + indexExpr + ') - 1] = ' + valueExpr;
+    }
+    return '(' + collection + ')[' + indexExpr + '] = ' + valueExpr;
+};
+
+SnapCodifier.indexDelete = function (collection, indexExpr) {
+    var lang = this.language,
+        idx = this.profile().indexBase === 0 ?
+            '((' + indexExpr + ') - 1)' : '(' + indexExpr + ')';
+    if (lang === 'python') {
+        return 'del (' + collection + ')[' + idx + ']';
+    }
+    if (lang === 'javascript') {
+        return '(' + collection + ').splice(' + idx + ', 1);';
+    }
+    if (lang === 'java') {
+        return '(' + collection + ').remove(' + idx + ');';
+    }
+    // lua table.remove is 1-based
+    return 'table.remove(' + collection + ', ' + indexExpr + ')';
+};
+
+SnapCodifier.indexInsert = function (collection, indexExpr, valueExpr) {
+    var lang = this.language,
+        idx = this.profile().indexBase === 0 ?
+            '((' + indexExpr + ') - 1)' : '(' + indexExpr + ')';
+    if (lang === 'python') {
+        return '(' + collection + ').insert(' + idx + ', ' + valueExpr + ')';
+    }
+    if (lang === 'javascript') {
+        return '(' + collection + ').splice(' + idx + ', 0, ' + valueExpr + ');';
+    }
+    if (lang === 'java') {
+        return '(' + collection + ').add(' + idx + ', ' + valueExpr + ');';
+    }
+    return 'table.insert(' + collection + ', ' + indexExpr + ', ' + valueExpr + ')';
+};
+
+SnapCodifier.listIndexOf = function (itemExpr, listExpr) {
+    // Snap "index of x in list" is 1-based; 0 if missing
+    var lang = this.language;
+    if (lang === 'python') {
+        return '((' + listExpr + ').index(' + itemExpr + ') + 1 if (' +
+            itemExpr + ') in (' + listExpr + ') else 0)';
+    }
+    if (lang === 'javascript') {
+        return '((' + listExpr + ').indexOf(' + itemExpr + ') + 1)';
+    }
+    if (lang === 'java') {
+        return '((' + listExpr + ').indexOf(' + itemExpr + ') + 1)';
+    }
+    // Lua: search returning 1-based index
+    return '(function(l,v) for i,x in ipairs(l) do if x==v then return i end end; return 0 end)(' +
+        listExpr + ', ' + itemExpr + ')';
+};
+
+SnapCodifier.rangeExpr = function (startExpr, endExpr) {
+    var lang = this.language;
+    if (lang === 'python') {
+        return 'list(range(' + startExpr + ', (' + endExpr + ') + 1))';
+    }
+    if (lang === 'javascript') {
+        return 'Array.from({length: (' + endExpr + ')-(' + startExpr +
+            ')+1}, (_,i) => (' + startExpr + ')+i)';
+    }
+    if (lang === 'java') {
+        return 'IntStream.rangeClosed(' + startExpr + ', ' + endExpr +
+            ').boxed().collect(Collectors.toList())';
+    }
+    return '(function(a,b) local t={} for i=a,b do t[#t+1]=i end return t end)(' +
+        startExpr + ', ' + endExpr + ')';
+};
+
+// ---- language templates (built per generation) ----------------------
+
+SnapCodifier.buildMappings = function () {
+    var p = this.profile(),
+        lang = this.language,
+        T = {},
+        semi = (lang === 'javascript' || lang === 'java') ? ';' : '',
+        forever, repeat, until, forLoop, forEach, ifThen, ifElse;
+
+    T.string = lang === 'javascript' ? "'<#1>'" : '"<#1>"';
+    T.number = '<#1>';
+    T.boolTrue = p.boolTrue;
+    T.boolFalse = p.boolFalse;
+    T.reify = '<#1>';
+    T.delim = ', ';
+    T.item = '<#1>';
+    T.list = lang === 'lua' ? '{<#1>}' :
+        (lang === 'java' ? 'new ArrayList<>(List.of(<#1>))' : '[<#1>]');
+    T.parms_delim = ', ';
+    T.parms_item = '<#1>';
+    T.parms_list = '<#1>';
+    T.tempvars_delim = ', ';
+    T.tempvars_item = '<#1>';
+    T.tempvars_list = '<#1>';
+
+    // Events
+    T.receiveGo = p.comment + ' when green flag clicked';
+    T.receiveKey = p.comment + ' when <#1> key pressed';
+    T.receiveInteraction = p.comment + ' when I am <#1>';
+    T.receiveMessage = p.comment + ' when I receive "<#1>"';
+    T.receiveCondition = p.comment + ' when <#1>';
+    T.receiveConditionEvent = p.comment + ' when <#1>';
+    T.receiveOnClone = p.comment + ' when I start as a clone';
+    T.receiveUserEdit = p.comment + ' when <#1> is edited';
+    T.receiveSlotEvent = p.comment + ' when slot <#1> signals <#2>';
+
+    // Motion
+    T.forward = 'move(<#1>)' + semi;
+    T.turn = 'turn_right(<#1>)' + semi;
+    T.turnLeft = 'turn_left(<#1>)' + semi;
+    T.setHeading = 'point_in_direction(<#1>)' + semi;
+    T.doFaceTowards = 'point_towards(<#1>)' + semi;
+    T.gotoXY = 'go_to(<#1>, <#2>)' + semi;
+    T.doGotoObject = 'go_to(<#1>)' + semi;
+    T.doGlide = 'glide(<#1>, <#2>, <#3>)' + semi;
+    T.changeXPosition = 'change_x(<#1>)' + semi;
+    T.setXPosition = 'set_x(<#1>)' + semi;
+    T.changeYPosition = 'change_y(<#1>)' + semi;
+    T.setYPosition = 'set_y(<#1>)' + semi;
+    T.bounceOffEdge = 'if_on_edge_bounce()' + semi;
+    T.getPosition = 'position()';
+    T.xPosition = 'x_position()';
+    T.yPosition = 'y_position()';
+    T.direction = 'direction()';
+
+    // Looks
+    T.doSayFor = 'say(<#1>, <#2>)' + semi;
+    T.bubble = 'say(<#1>)' + semi;
+    T.doThinkFor = 'think(<#1>, <#2>)' + semi;
+    T.doThink = 'think(<#1>)' + semi;
+    T.doSwitchToCostume = 'switch_costume(<#1>)' + semi;
+    T.doWearNextCostume = 'next_costume()' + semi;
+    T.getCostumeIdx = 'costume_number()';
+    T.changeEffect = 'change_effect(<#1>, <#2>)' + semi;
+    T.setEffect = 'set_effect(<#1>, <#2>)' + semi;
+    T.getEffect = 'effect(<#1>)';
+    T.clearEffects = 'clear_graphic_effects()' + semi;
+    T.changeScale = 'change_size(<#1>)' + semi;
+    T.setScale = 'set_size(<#1>)' + semi;
+    T.getScale = 'size()';
+    T.show = 'show()' + semi;
+    T.hide = 'hide()' + semi;
+    T.reportShown = 'is_shown()';
+    T.goToLayer = 'go_to_layer(<#1>)' + semi;
+    T.goBack = 'go_back_layers(<#1>)' + semi;
+    T.alert = 'alert(<#1>)' + semi;
+    T.log = (lang === 'python' ? 'print(<#1>)' :
+        (lang === 'lua' ? 'print(<#1>)' : 'console.log(<#1>)' + semi));
+
+    // Sound
+    T.playSound = 'play_sound(<#1>)' + semi;
+    T.doPlaySoundUntilDone = 'play_sound_until_done(<#1>)' + semi;
+    T.doPlaySoundAtRate = 'play_sound_at(<#1>, <#2>)' + semi;
+    T.doStopAllSounds = 'stop_all_sounds()' + semi;
+    T.doRest = 'rest(<#1>)' + semi;
+    T.doPlayNote = 'play_note(<#1>, <#2>)' + semi;
+    T.doPlayFrequency = 'play_frequency(<#1>, <#2>)' + semi;
+    T.doSetInstrument = 'set_instrument(<#1>)' + semi;
+    T.doChangeTempo = 'change_tempo(<#1>)' + semi;
+    T.doSetTempo = 'set_tempo(<#1>)' + semi;
+    T.getTempo = 'tempo()';
+    T.changeVolume = 'change_volume(<#1>)' + semi;
+    T.setVolume = 'set_volume(<#1>)' + semi;
+    T.getVolume = 'volume()';
+    T.changePan = 'change_balance(<#1>)' + semi;
+    T.setPan = 'set_balance(<#1>)' + semi;
+    T.getPan = 'balance()';
+    T.playFreq = 'play_frequency(<#1>)' + semi;
+    T.stopFreq = 'stop_frequency()' + semi;
+
+    // Pen
+    T.clear = 'clear()' + semi;
+    T.down = 'pen_down()' + semi;
+    T.up = 'pen_up()' + semi;
+    T.getPenDown = 'is_pen_down()';
+    T.setColor = 'set_pen_color(<#1>)' + semi;
+    T.setPenColorDimension = 'set_pen_<#1>(<#2>)' + semi;
+    T.changePenColorDimension = 'change_pen_<#1>(<#2>)' + semi;
+    T.getPenAttribute = 'pen_<#1>()';
+    T.changeSize = 'change_pen_size(<#1>)' + semi;
+    T.setSize = 'set_pen_size(<#1>)' + semi;
+    T.doStamp = 'stamp()' + semi;
+    T.floodFill = 'fill()' + semi;
+    T.write = 'write_pen(<#1>, <#2>)' + semi;
+    T.doPasteOn = 'paste_on(<#1>)' + semi;
+    T.doCutFrom = 'cut_from(<#1>)' + semi;
+
+    // Control structures — language specific
+    if (lang === 'python') {
+        forever = 'while True:\n    <#1>';
+        repeat = 'for _ in range(int(<#1>)):\n    <#2>';
+        until = 'while not (<#1>):\n    <#2>';
+        forLoop = 'for <#1> in range(int(<#2>), int(<#3>) + 1):\n    <#4>';
+        forEach = 'for <#1> in <#2>:\n    <#3>';
+        ifThen = 'if <#1>:\n    <#2>';
+        ifElse = 'if <#1>:\n    <#2>\nelse:\n    <#3>';
+        T.reportIfElse = '(<#2> if <#1> else <#3>)';
+        T.doReport = 'return <#1>';
+        T.doStopThis = 'return';
+        T.doStopAll = 'stop_all()';
+        T.doWait = 'wait(<#1>)';
+        T.doWaitUntil = 'wait_until(lambda: <#1>)';
+        T.doBroadcast = 'broadcast("<#1>")';
+        T.doBroadcastAndWait = 'broadcast_and_wait("<#1>")';
+        T.doDeclareVariables = '<#1> = None';
+        T.doSetVar = '<#1> = <#2>';
+        T.doChangeVar = '<#1> = (<#1>) + (<#2>)';
+        T.doShowVar = 'show_variable("<#1>")';
+        T.doHideVar = 'hide_variable("<#1>")';
+        T.doRun = '<#1>(<#2>)';
+        T.fork = 'async_launch(<#1>, <#2>)';
+        T.evaluate = '<#1>(<#2>)';
+        T.doWarp = '<#1>';
+        T.createClone = 'create_clone(<#1>)';
+        T.removeClone = 'delete_this_clone()';
+        T.doPauseAll = 'pause_all()';
+        T.doAsk = 'ask(<#1>)';
+    } else if (lang === 'javascript') {
+        forever = 'while (true) {\n    <#1>\n}';
+        repeat = 'for (let _i = 0; _i < <#1>; _i++) {\n    <#2>\n}';
+        until = 'while (!(<#1>)) {\n    <#2>\n}';
+        forLoop = 'for (let <#1> = <#2>; <#1> <= <#3>; <#1>++) {\n    <#4>\n}';
+        forEach = 'for (const <#1> of <#2>) {\n    <#3>\n}';
+        ifThen = 'if (<#1>) {\n    <#2>\n}';
+        ifElse = 'if (<#1>) {\n    <#2>\n} else {\n    <#3>\n}';
+        T.reportIfElse = '(<#1> ? <#2> : <#3>)';
+        T.doReport = 'return <#1>;';
+        T.doStopThis = 'return;';
+        T.doStopAll = 'stopAll();';
+        T.doWait = 'await wait(<#1>);';
+        T.doWaitUntil = 'await waitUntil(() => <#1>);';
+        T.doBroadcast = 'broadcast("<#1>");';
+        T.doBroadcastAndWait = 'await broadcastAndWait("<#1>");';
+        T.doDeclareVariables = 'let <#1>;';
+        T.doSetVar = '<#1> = <#2>;';
+        T.doChangeVar = '<#1> += <#2>;';
+        T.doShowVar = 'showVariable("<#1>");';
+        T.doHideVar = 'hideVariable("<#1>");';
+        T.doRun = '<#1>(<#2>);';
+        T.fork = 'queueMicrotask(() => <#1>(<#2>));';
+        T.evaluate = '<#1>(<#2>)';
+        T.doWarp = '<#1>';
+        T.createClone = 'createClone(<#1>);';
+        T.removeClone = 'deleteThisClone();';
+        T.doPauseAll = 'pauseAll();';
+        T.doAsk = 'await ask(<#1>);';
+    } else if (lang === 'java') {
+        forever = 'while (true) {\n    <#1>\n}';
+        repeat = 'for (int _i = 0; _i < <#1>; _i++) {\n    <#2>\n}';
+        until = 'while (!(<#1>)) {\n    <#2>\n}';
+        forLoop = 'for (int <#1> = <#2>; <#1> <= <#3>; <#1>++) {\n    <#4>\n}';
+        forEach = 'for (Object <#1> : <#2>) {\n    <#3>\n}';
+        ifThen = 'if (<#1>) {\n    <#2>\n}';
+        ifElse = 'if (<#1>) {\n    <#2>\n} else {\n    <#3>\n}';
+        T.reportIfElse = '(<#1> ? <#2> : <#3>)';
+        T.doReport = 'return <#1>;';
+        T.doStopThis = 'return;';
+        T.doStopAll = 'stopAll();';
+        T.doWait = 'waitSecs(<#1>);';
+        T.doWaitUntil = 'waitUntil(<#1>);';
+        T.doBroadcast = 'broadcast("<#1>");';
+        T.doBroadcastAndWait = 'broadcastAndWait("<#1>");';
+        T.doDeclareVariables = 'Object <#1> = null;';
+        T.doSetVar = '<#1> = <#2>;';
+        T.doChangeVar = '<#1> = ((Number)<#1>).doubleValue() + ((Number)(<#2>)).doubleValue();';
+        T.doShowVar = 'showVariable("<#1>");';
+        T.doHideVar = 'hideVariable("<#1>");';
+        T.doRun = '<#1>.run(<#2>);';
+        T.fork = 'launch(<#1>, <#2>);';
+        T.evaluate = '<#1>.call(<#2>)';
+        T.doWarp = '<#1>';
+        T.createClone = 'createClone(<#1>);';
+        T.removeClone = 'deleteThisClone();';
+        T.doPauseAll = 'pauseAll();';
+        T.doAsk = 'ask(<#1>);';
+    } else { // lua
+        forever = 'while true do\n    <#1>\nend';
+        repeat = 'for _ = 1, <#1> do\n    <#2>\nend';
+        until = 'while not (<#1>) do\n    <#2>\nend';
+        forLoop = 'for <#1> = <#2>, <#3> do\n    <#4>\nend';
+        forEach = 'for _, <#1> in ipairs(<#2>) do\n    <#3>\nend';
+        ifThen = 'if <#1> then\n    <#2>\nend';
+        ifElse = 'if <#1> then\n    <#2>\nelse\n    <#3>\nend';
+        T.reportIfElse = '(<#1> and <#2> or <#3>)';
+        T.doReport = 'return <#1>';
+        T.doStopThis = 'return';
+        T.doStopAll = 'stop_all()';
+        T.doWait = 'wait(<#1>)';
+        T.doWaitUntil = 'wait_until(function() return <#1> end)';
+        T.doBroadcast = 'broadcast("<#1>")';
+        T.doBroadcastAndWait = 'broadcast_and_wait("<#1>")';
+        T.doDeclareVariables = 'local <#1>';
+        T.doSetVar = '<#1> = <#2>';
+        T.doChangeVar = '<#1> = <#1> + <#2>';
+        T.doShowVar = 'show_variable("<#1>")';
+        T.doHideVar = 'hide_variable("<#1>")';
+        T.doRun = '<#1>(<#2>)';
+        T.fork = 'launch(<#1>, <#2>)';
+        T.evaluate = '<#1>(<#2>)';
+        T.doWarp = '<#1>';
+        T.createClone = 'create_clone(<#1>)';
+        T.removeClone = 'delete_this_clone()';
+        T.doPauseAll = 'pause_all()';
+        T.doAsk = 'ask(<#1>)';
+    }
+
+    T.doForever = forever;
+    T.doRepeat = repeat;
+    T.doUntil = until;
+    T.doFor = forLoop;
+    T.doForEach = forEach;
+    T.doIf = ifThen;
+    T.doIfElse = ifElse;
+
+    // Sensing
+    T.reportTouchingObject = 'touching(<#1>)';
+    T.reportTouchingColor = 'touching_color(<#1>)';
+    T.reportColorIsTouchingColor = 'color_is_touching(<#1>, <#2>)';
+    T.reportLastAnswer = 'answer()';
+    T.getLastAnswer = 'answer()';
+    T.reportMousePosition = 'mouse_position()';
+    T.reportMouseX = 'mouse_x()';
+    T.reportMouseY = 'mouse_y()';
+    T.reportMouseDown = 'mouse_down()';
+    T.reportKeyPressed = 'key_pressed(<#1>)';
+    T.doResetTimer = 'reset_timer()' + semi;
+    T.reportTimer = 'timer()';
+    T.getTimer = 'timer()';
+    T.reportAttributeOf = 'attribute(<#1>, <#2>)';
+    T.reportObject = 'object(<#1>)';
+    T.reportURL = 'http_get(<#1>)';
+    T.reportDate = 'current(<#1>)';
+    T.reportGet = 'my(<#1>)';
+    T.reportAspect = 'aspect(<#1>, <#2>)';
+    T.reportRelationTo = 'relation(<#1>, <#2>)';
+    T.reportAudio = 'microphone(<#1>)';
+    T.reportVideo = 'video(<#1>, <#2>)';
+
+    // Operators
+    T.reportSum = '(<#1> + <#2>)';
+    T.reportDifference = '(<#1> - <#2>)';
+    T.reportProduct = '(<#1> * <#2>)';
+    T.reportQuotient = '(<#1> / <#2>)';
+    T.reportModulus = '(<#1> % <#2>)';
+    T.reportPower = lang === 'python' ? '(<#1> ** <#2>)' :
+        (lang === 'lua' ? '(<#1> ^ <#2>)' : 'Math.pow(<#1>, <#2>)');
+    T.reportRound = lang === 'python' ? 'round(<#1>)' :
+        (lang === 'lua' ? 'math.floor(<#1>+0.5)' : 'Math.round(<#1>)');
+    T.reportMonadic = lang === 'python' ? '<#1>(<#2>)' :
+        (lang === 'lua' ? 'math.<#1>(<#2>)' : 'Math.<#1>(<#2>)');
+    T.reportAtan2 = lang === 'python' ? 'math.atan2(<#1>, <#2>)' :
+        (lang === 'lua' ? 'math.atan2(<#1>, <#2>)' : 'Math.atan2(<#1>, <#2>)');
+    T.reportRandom = lang === 'python' ? 'random.randint(int(<#1>), int(<#2>))' :
+        (lang === 'lua' ? 'math.random(<#1>, <#2>)' :
+            '(<#1> + Math.floor(Math.random()*((<#2>)-(<#1>)+1)))');
+    T.reportLessThan = '(<#1> < <#2>)';
+    T.reportEquals = lang === 'javascript' ? '(<#1> === <#2>)' : '(<#1> == <#2>)';
+    T.reportGreaterThan = '(<#1> > <#2>)';
+    T.reportLessThanOrEquals = '(<#1> <= <#2>)';
+    T.reportGreaterThanOrEquals = '(<#1> >= <#2>)';
+    T.reportNotEquals = lang === 'javascript' ? '(<#1> !== <#2>)' : '(<#1> != <#2>)';
+    T.reportAnd = '(<#1> ' + p.andOp + ' <#2>)';
+    T.reportOr = '(<#1> ' + p.orOp + ' <#2>)';
+    T.reportNot = '(' + p.notOp + '<#1>)';
+    T.reportBoolean = '<#1>';
+    T.reportTrue = p.boolTrue;
+    T.reportFalse = p.boolFalse;
+    T.reportJoinWords = lang === 'python' ? '"".join([str(x) for x in [<#1>]])' :
+        (lang === 'javascript' ? '[<#1>].join("")' :
+            (lang === 'java' ? 'String.valueOf(<#1>)' : 'table.concat({<#1>})'));
+    T.reportStringSize = lang === 'python' ? 'len(str(<#1>))' :
+        (lang === 'javascript' ? 'String(<#1>).length' :
+            (lang === 'java' ? 'String.valueOf(<#1>).length()' : '#tostring(<#1>)'));
+    T.reportTextAttribute = lang === 'python' ? 'len(str(<#2>))' :
+        (lang === 'javascript' ? 'String(<#2>).length' :
+            (lang === 'java' ? 'String.valueOf(<#2>).length()' : '#tostring(<#2>)'));
+    T.reportUnicode = lang === 'python' ? 'ord(str(<#1>)[0])' :
+        (lang === 'javascript' ? 'String(<#1>).charCodeAt(0)' :
+            (lang === 'java' ? '(int)String.valueOf(<#1>).charAt(0)' :
+                'string.byte(tostring(<#1>), 1)'));
+    T.reportUnicodeAsLetter = lang === 'python' ? 'chr(int(<#1>))' :
+        (lang === 'javascript' ? 'String.fromCharCode(<#1>)' :
+            (lang === 'java' ? 'String.valueOf((char)(int)(<#1>))' :
+                'string.char(<#1>)'));
+    T.reportIsA = lang === 'python' ? 'isinstance(<#1>, <#2>)' :
+        (lang === 'javascript' ? '(typeof <#1> === String(<#2>).toLowerCase())' :
+            (lang === 'java' ? '(<#1> instanceof Object /* <#2> */)' :
+                '(type(<#1>) == "<#2>")'));
+    T.reportIsIdentical = lang === 'python' ? '(<#1> is <#2>)' :
+        (lang === 'javascript' ? '(<#1> === <#2>)' : '(<#1> == <#2>)');
+    T.reportVariadicIsIdentical = T.reportIsIdentical;
+    T.reportTextSplit = lang === 'python' ? 'str(<#1>).split(<#2>)' :
+        (lang === 'javascript' ? 'String(<#1>).split(<#2>)' :
+            (lang === 'java' ? 'String.valueOf(<#1>).split(<#2>)' :
+                'split_string(<#1>, <#2>)'));
+    T.reportTypeOf = lang === 'python' ? 'type(<#1>).__name__' :
+        (lang === 'javascript' ? 'typeof <#1>' : 'type(<#1>)');
+    T.reportVariadicSum = '(<#1>)';
+    T.reportVariadicProduct = '(<#1>)';
+    T.reportVariadicMin = lang === 'python' ? 'min(<#1>)' :
+        (lang === 'javascript' ? 'Math.min(<#1>)' :
+            (lang === 'java' ? 'Collections.min(List.of(<#1>))' : 'math.min(<#1>)'));
+    T.reportVariadicMax = lang === 'python' ? 'max(<#1>)' :
+        (lang === 'javascript' ? 'Math.max(<#1>)' :
+            (lang === 'java' ? 'Collections.max(List.of(<#1>))' : 'math.max(<#1>)'));
+    T.reportVariadicLessThan = '(<#1>)';
+    T.reportVariadicEquals = '(<#1>)';
+    T.reportVariadicGreaterThan = '(<#1>)';
+    T.reportVariadicAnd = '(<#1>)';
+    T.reportVariadicOr = '(<#1>)';
+
+    // Lists — index-aware where needed (special emitters also used)
+    T.reportNewList = T.list;
+    T.reportCONS = lang === 'python' ? '[<#1>] + list(<#2>)' :
+        (lang === 'javascript' ? '[<#1>, ...<#2>]' :
+            (lang === 'java' ? 'cons(<#1>, <#2>)' :
+                '(function(a,t) local u={a} for i=1,#t do u[i+1]=t[i] end return u end)(<#1>,<#2>)'));
+    T.reportCDR = lang === 'python' ? 'list(<#1>)[1:]' :
+        (lang === 'javascript' ? '(<#1>).slice(1)' :
+            (lang === 'java' ? '(<#1>).subList(1, (<#1>).size())' :
+                '(function(t) local u={} for i=2,#t do u[#u+1]=t[i] end return u end)(<#1>)'));
+    T.reportListLength = lang === 'python' ? 'len(<#1>)' :
+        (lang === 'javascript' ? '(<#1>).length' :
+            (lang === 'java' ? '(<#1>).size()' : '#(<#1>)'));
+    T.reportListAttribute = T.reportListLength;
+    T.reportListContainsItem = lang === 'python' ? '((<#2>) in (<#1>))' :
+        (lang === 'javascript' ? '(<#1>).includes(<#2>)' :
+            (lang === 'java' ? '(<#1>).contains(<#2>)' :
+                'table_contains(<#1>, <#2>)'));
+    T.reportListIsEmpty = lang === 'python' ? '(len(<#1>) == 0)' :
+        (lang === 'javascript' ? '((<#1>).length === 0)' :
+            (lang === 'java' ? '(<#1>).isEmpty()' : '(#(<#1>) == 0)'));
+    T.doAddToList = lang === 'python' ? '(<#2>).append(<#1>)' :
+        (lang === 'javascript' ? '(<#2>).push(<#1>);' :
+            (lang === 'java' ? '(<#2>).add(<#1>);' :
+                'table.insert(<#2>, <#1>)'));
+    T.reportConcatenatedLists = lang === 'python' ? '(<#1>)' :
+        (lang === 'javascript' ? '[].concat(<#1>)' :
+            (lang === 'java' ? 'concatLists(<#1>)' : 'concat_lists(<#1>)'));
+    T.reportMap = lang === 'python' ? '[<#1>(x) for x in <#2>]' :
+        (lang === 'javascript' ? '(<#2>).map(<#1>)' :
+            (lang === 'java' ? 'mapList(<#1>, <#2>)' : 'map_list(<#1>, <#2>)'));
+    T.reportKeep = lang === 'python' ? '[x for x in <#2> if <#1>(x)]' :
+        (lang === 'javascript' ? '(<#2>).filter(<#1>)' :
+            (lang === 'java' ? 'keepList(<#1>, <#2>)' : 'keep_list(<#1>, <#2>)'));
+    T.reportFindFirst = lang === 'python' ? 'next((x for x in <#2> if <#1>(x)), None)' :
+        (lang === 'javascript' ? '(<#2>).find(<#1>)' :
+            (lang === 'java' ? 'findFirst(<#1>, <#2>)' : 'find_first(<#1>, <#2>)'));
+    T.reportCombine = lang === 'python' ? 'functools.reduce(<#2>, <#1>)' :
+        (lang === 'javascript' ? '(<#1>).reduce(<#2>)' :
+            (lang === 'java' ? 'combineList(<#1>, <#2>)' : 'combine_list(<#1>, <#2>)'));
+    T.reportAtomicMap = T.reportMap;
+    T.reportAtomicKeep = T.reportKeep;
+    T.reportAtomicFindFirst = T.reportFindFirst;
+    T.reportAtomicCombine = T.reportCombine;
+
+    // Index-aware list/text ops: Snap is always 1-based.
+    // Python/JS/Java → subtract 1; Lua stays 1-based like Snap.
+    if (lang === 'python') {
+        T.reportListItem = '(<#2>)[(<#1>) - 1]';
+        T.reportLetter = 'str(<#2>)[(<#1>) - 1]';
+        T.doDeleteFromList = 'del (<#2>)[(<#1>) - 1]';
+        T.doInsertInList = '(<#3>).insert((<#2>) - 1, <#1>)';
+        T.doReplaceInList = '(<#3>)[(<#2>) - 1] = <#1>';
+        T.reportListIndex = '((<#2>).index(<#1>) + 1 if (<#1>) in (<#2>) else 0)';
+        T.reportNumbers = 'list(range(int(<#1>), int(<#2>) + 1))';
+    } else if (lang === 'javascript') {
+        T.reportListItem = '(<#2>)[(<#1>) - 1]';
+        T.reportLetter = 'String(<#2>).charAt((<#1>) - 1)';
+        T.doDeleteFromList = '(<#2>).splice((<#1>) - 1, 1);';
+        T.doInsertInList = '(<#3>).splice((<#2>) - 1, 0, <#1>);';
+        T.doReplaceInList = '(<#3>)[(<#2>) - 1] = <#1>;';
+        T.reportListIndex = '((<#2>).indexOf(<#1>) + 1)';
+        T.reportNumbers = 'Array.from({length: (<#2>)-(<#1>)+1}, (_,i)=>(<#1>)+i)';
+    } else if (lang === 'java') {
+        T.reportListItem = '(<#2>).get((<#1>) - 1)';
+        T.reportLetter = 'String.valueOf(<#2>).charAt((<#1>) - 1)';
+        T.doDeleteFromList = '(<#2>).remove((<#1>) - 1);';
+        T.doInsertInList = '(<#3>).add((<#2>) - 1, <#1>);';
+        T.doReplaceInList = '(<#3>).set((<#2>) - 1, <#1>);';
+        T.reportListIndex = '((<#2>).indexOf(<#1>) + 1)';
+        T.reportNumbers = 'rangeList(<#1>, <#2>)';
+    } else { // lua — 1-based like Snap
+        T.reportListItem = '(<#2>)[<#1>]';
+        T.reportLetter = 'string.sub(tostring(<#2>), <#1>, <#1>)';
+        T.doDeleteFromList = 'table.remove(<#2>, <#1>)';
+        T.doInsertInList = 'table.insert(<#3>, <#2>, <#1>)';
+        T.doReplaceInList = '(<#3>)[<#2>] = <#1>';
+        T.reportListIndex = '(function(l,v) for i,x in ipairs(l) do if x==v then return i end end return 0 end)(<#2>,<#1>)';
+        T.reportNumbers = '(function(a,b) local t={} for i=a,b do t[#t+1]=i end return t end)(<#1>,<#2>)';
+    }
+
+    // Rings / higher-order
+    T.reifyScript = lang === 'python' ? '(lambda: (<#1>))' :
+        (lang === 'javascript' ? '(() => { <#1> })' :
+            (lang === 'java' ? '(() -> { <#1> })' : 'function() <#1> end'));
+    T.reifyReporter = lang === 'python' ? '(lambda: <#1>)' :
+        (lang === 'javascript' ? '(() => <#1>)' :
+            (lang === 'java' ? '(() -> <#1>)' : 'function() return <#1> end'));
+    T.reifyPredicate = T.reifyReporter;
+
+    // Misc / metaprogramming stubs
+    T.doDefineBlock = p.comment + ' define block <#1>';
+    T.doDeleteBlock = p.comment + ' delete block <#1>';
+    T.doSetBlockAttribute = p.comment + ' set block attribute';
+    T.reportBlockAttribute = 'block_attribute(<#1>, <#2>)';
+    T.reportEnvironment = 'this_environment(<#1>)';
+    T.reportPipe = 'pipe(<#1>, <#2>)';
+    T.doTellTo = 'tell(<#1>, <#2>)' + semi;
+    T.reportAskFor = 'ask_for(<#1>, <#2>, <#3>)';
+    T.newClone = 'new_clone(<#1>)';
+    T.doSwitchToScene = 'switch_scene(<#1>)' + semi;
+
+    return T;
 };
 
 SnapCodifier.applyLanguage = function (langId) {
-    var template = this.templates[langId] || this.templates.python,
-        target = StageMorph.prototype.codeMappings,
-        key;
+    var template, target, key;
+    if (langId) { this.language = langId; }
+    template = this.buildMappings();
+    target = StageMorph.prototype.codeMappings;
     for (key in target) {
         if (Object.prototype.hasOwnProperty.call(target, key)) {
             delete target[key];
@@ -685,36 +789,150 @@ SnapCodifier.applyLanguage = function (langId) {
             target[key] = template[key];
         }
     }
-    this.language = langId;
 };
 
-SnapCodifier.currentMeta = function () {
-    return this.languages[this.language] || this.languages.python;
+// ---- custom blocks → functions --------------------------------------
+
+SnapCodifier.functionSignature = function (definition) {
+    var name = this.specToFunctionName(definition.spec),
+        params = this.inputNamesOf(definition),
+        lang = this.language,
+        p = this.profile(),
+        paramList = params.join(', '),
+        empty = !definition.body || !definition.body.expression,
+        bodyStub = empty ? p.emptyBody : '<body>',
+        header,
+        call,
+        i,
+        callArgs = [];
+
+    for (i = 1; i <= Math.max(params.length, definition.declarations ?
+            definition.declarations.size : 0); i += 1) {
+        callArgs.push('<#' + i + '>');
+    }
+    // Fall back to inputNames length
+    if (!callArgs.length && params.length) {
+        callArgs = params.map((_, idx) => '<#' + (idx + 1) + '>');
+    }
+    // Always at least allow zero-arg call
+    call = name + '(' + callArgs.join(', ') + ')';
+
+    if (lang === 'python') {
+        header = 'def ' + name + '(' + paramList + '):\n    ' + bodyStub;
+        if (definition.type === 'reporter' || definition.type === 'predicate') {
+            // callers use expression form
+        } else {
+            // command
+        }
+    } else if (lang === 'javascript') {
+        header = 'function ' + name + '(' + paramList + ') {\n    ' +
+            (empty ? bodyStub : bodyStub) + '\n}';
+        // For non-empty, mappedCode replaces <body>
+        header = 'function ' + name + '(' + paramList + ') {\n    <body>\n}';
+        if (empty) {
+            header = 'function ' + name + '(' + paramList + ') {\n    ' +
+                p.emptyBody + '\n}';
+        }
+        if (!empty && (definition.type === 'command')) {
+            call = call + ';';
+        }
+    } else if (lang === 'java') {
+        header = 'public static Object ' + name + '(' +
+            params.map(n => 'Object ' + n).join(', ') + ') {\n    <body>\n}';
+        if (empty) {
+            header = 'public static Object ' + name + '(' +
+                params.map(n => 'Object ' + n).join(', ') + ') {\n    ' +
+                p.emptyBody + '\n    return null;\n}';
+        }
+        if (!empty && definition.type === 'command') {
+            call = call + ';';
+        }
+    } else { // lua
+        header = 'function ' + name + '(' + paramList + ')\n    <body>\nend';
+        if (empty) {
+            header = 'function ' + name + '(' + paramList + ')\n    ' +
+                p.emptyBody + '\nend';
+        }
+    }
+
+    // Python empty / non-empty headers
+    if (lang === 'python') {
+        if (empty) {
+            header = 'def ' + name + '(' + paramList + '):\n    ' + p.emptyBody;
+        } else {
+            header = 'def ' + name + '(' + paramList + '):\n    <body>';
+        }
+    }
+
+    return {name: name, header: header, call: call, params: params};
 };
 
-SnapCodifier.sanitizeIdentifier = function (name) {
-    return String(name || 'sprite')
-        .replace(/[^A-Za-z0-9_]+/g, '_')
-        .replace(/^(\d)/, '_$1');
+SnapCodifier.collectDefinitions = function (ide) {
+    var defs = [],
+        seen = new Set(),
+        add = function (list) {
+            if (!list) { return; }
+            list.forEach(def => {
+                if (!def || seen.has(def)) { return; }
+                seen.add(def);
+                defs.push(def);
+            });
+        };
+    if (!ide) { return defs; }
+    if (ide.stage) {
+        add(ide.stage.globalBlocks);
+        add(ide.stage.customBlocks);
+    }
+    if (ide.sprites && ide.sprites.asArray) {
+        ide.sprites.asArray().forEach(spr => add(spr.customBlocks));
+    }
+    if (ide.currentSprite) {
+        add(ide.currentSprite.customBlocks);
+    }
+    return defs;
 };
+
+SnapCodifier.installCustomMappings = function (ide) {
+    var backups = [];
+    this.collectDefinitions(ide).forEach(def => {
+        var sig = this.functionSignature(def);
+        backups.push({
+            def: def,
+            codeMapping: def.codeMapping,
+            codeHeader: def.codeHeader
+        });
+        def.codeHeader = sig.header;
+        def.codeMapping = sig.call;
+    });
+    this._customBackups = backups;
+};
+
+SnapCodifier.restoreCustomMappings = function () {
+    if (!this._customBackups) { return; }
+    this._customBackups.forEach(b => {
+        b.def.codeMapping = b.codeMapping;
+        b.def.codeHeader = b.codeHeader;
+    });
+    this._customBackups = null;
+};
+
+// ---- generation with patches for names ------------------------------
 
 SnapCodifier.blockFallback = function (block) {
-    var meta = this.currentMeta(),
-        label;
+    var label;
     try {
         label = block.abstractBlockSpec ? block.abstractBlockSpec()
             : (block.blockSpec || block.selector || 'block');
     } catch (err) {
         label = block.selector || 'block';
     }
-    return meta.comment + ' [unmapped: ' + label + ']';
+    return this.profile().comment + ' [unmapped: ' + label + ']';
 };
 
 SnapCodifier.ensureFallbacks = function (block) {
-    // Walk the script stack and give unmapped selectors a comment stub
-    // so they still appear in the live output.
     var cursor = block,
-        sel;
+        sel,
+        nested;
     while (cursor instanceof BlockMorph) {
         sel = cursor.selector;
         if (!cursor.isCustomBlock &&
@@ -727,7 +945,7 @@ SnapCodifier.ensureFallbacks = function (block) {
             if (input instanceof BlockMorph) {
                 this.ensureFallbacks(input);
             } else if (input && input.nestedBlock) {
-                var nested = input.nestedBlock();
+                nested = input.nestedBlock();
                 if (nested) { this.ensureFallbacks(nested); }
             }
         });
@@ -753,7 +971,7 @@ SnapCodifier.scriptsOf = function (sprite) {
 };
 
 SnapCodifier.generateForSprite = function (sprite) {
-    var meta = this.currentMeta(),
+    var meta = this.profile(),
         scripts = this.scriptsOf(sprite),
         chunks = [],
         header,
@@ -774,69 +992,162 @@ SnapCodifier.generateForSprite = function (sprite) {
     return header + '\n\n' + chunks.join('\n\n') + '\n';
 };
 
-SnapCodifier.generate = function (ide) {
-    var meta = this.currentMeta(),
-        parts = [],
-        sprite,
-        stage,
-        text,
-        prelude;
+SnapCodifier.withTranslationContext = function (ide, fn) {
+    var myself = this,
+        targetMaps = StageMorph.prototype.codeMappings,
+        previousMaps = Object.assign({}, targetMaps),
+        key,
+        origBlockMapped = BlockMorph.prototype.mappedCode,
+        origInputMapped = InputSlotMorph.prototype.mappedCode,
+        origTemplateEval = TemplateSlotMorph.prototype.evaluate,
+        result;
 
-    if (!ide) {
-        return meta.empty;
-    }
+    this._identCache = {};
+    this.applyLanguage(this.language);
+    this.installCustomMappings(ide);
 
-    // Apply selected language mappings for this generation pass.
-    // Preserve any user/project mappings by snapshot + restore in place
-    // so scene references to codeMappings stay valid.
-    var targetMaps = StageMorph.prototype.codeMappings,
-        previous = Object.assign({}, targetMaps),
-        key;
-    try {
-        this.applyLanguage(this.language);
-        if (this.scope === 'all') {
-            stage = ide.stage;
-            if (stage) {
-                text = this.generateForSprite(stage);
-                if (text) { parts.push(text); }
+    // Sanitize variable reporters: Snap "my var" → my_var
+    BlockMorph.prototype.mappedCode = function (definitions) {
+        var code, next;
+        if (this.selector === 'reportGetVar') {
+            code = myself.ident(this.blockSpec);
+            if (this.nextBlock && this.nextBlock()) {
+                next = this.nextBlock().mappedCode(definitions);
+                if (next) { code += '\n' + next; }
             }
-            if (ide.sprites && ide.sprites.asArray) {
-                ide.sprites.asArray().forEach(spr => {
-                    text = this.generateForSprite(spr);
-                    if (text) { parts.push(text); }
-                });
-            }
-        } else {
-            sprite = ide.currentSprite || ide.stage;
-            text = this.generateForSprite(sprite);
-            if (text) { parts.push(text); }
+            return code;
         }
+        return origBlockMapped.call(this, definitions);
+    };
+
+    // Sanitize variable *slots* in set/change/show/hide
+    InputSlotMorph.prototype.mappedCode = function () {
+        var block = this.parentThatIsA(BlockMorph),
+            val,
+            mapped;
+        if (block && contains(
+                ['doSetVar', 'doChangeVar', 'doShowVar', 'doHideVar'],
+                block.selector
+            )) {
+            // Only the variable-name slot (first input) is an identifier
+            if (block.inputs()[0] === this) {
+                val = this.evaluate();
+                return myself.ident(val);
+            }
+        }
+        mapped = origInputMapped.call(this);
+        return mapped;
+    };
+
+    // Sanitize upvars in for / for each templates
+    TemplateSlotMorph.prototype.evaluate = function () {
+        return myself.ident(this.contents());
+    };
+
+    try {
+        result = fn.call(this);
     } finally {
+        BlockMorph.prototype.mappedCode = origBlockMapped;
+        InputSlotMorph.prototype.mappedCode = origInputMapped;
+        TemplateSlotMorph.prototype.evaluate = origTemplateEval;
+        this.restoreCustomMappings();
         for (key in targetMaps) {
             if (Object.prototype.hasOwnProperty.call(targetMaps, key)) {
                 delete targetMaps[key];
             }
         }
-        Object.assign(targetMaps, previous);
+        Object.assign(targetMaps, previousMaps);
+        this._identCache = null;
     }
+    return result;
+};
 
-    if (!parts.length) {
+SnapCodifier.prelude = function () {
+    var p = this.profile(),
+        lang = this.language,
+        lines = [];
+
+    lines.push(p.comment + ' Generated live from Snap!  →  ' + p.label);
+    lines.push(p.comment + ' Output only — edit blocks on the left to change this.');
+    lines.push(p.comment +
+        ' Names: Snap allows spaces; identifiers are sanitized (e.g. "my var" → my_var).');
+    if (p.indexBase === 0) {
+        lines.push(p.comment +
+            ' Indexing: Snap is 1-based; this output converts item/letter indexes to 0-based.');
+    } else {
+        lines.push(p.comment +
+            ' Indexing: Snap and ' + p.label + ' are both 1-based (no conversion).');
+    }
+    lines.push(p.comment +
+        ' Custom blocks become functions; nested reporters compose as arguments.');
+    lines.push('');
+
+    if (lang === 'python') {
+        lines.push('import random');
+        lines.push('import functools');
+        lines.push('import math');
+        lines.push('');
+    } else if (lang === 'java') {
+        lines.push('import java.util.*;');
+        lines.push('import java.util.stream.*;');
+        lines.push('');
+        lines.push('public class SnapExport {');
+        lines.push('    // helper stubs / scripts');
+        lines.push('');
+    } else if (lang === 'lua') {
+        lines.push('local function table_contains(t, v)');
+        lines.push('    for _, x in ipairs(t) do if x == v then return true end end');
+        lines.push('    return false');
+        lines.push('end');
+        lines.push('');
+    }
+    return lines.join('\n');
+};
+
+SnapCodifier.epilogue = function () {
+    if (this.language === 'java') {
+        return '\n}\n';
+    }
+    return '';
+};
+
+SnapCodifier.generate = function (ide) {
+    var meta = this.profile(),
+        myself = this;
+
+    if (!ide) {
         return meta.empty;
     }
 
-    prelude = meta.comment + ' Generated live from Snap!  →  ' + meta.label +
-        '\n' + meta.comment + ' Output only — edit blocks on the left to change this.\n\n';
-    if (this.language === 'python') {
-        prelude += 'import random\nimport functools\n\n';
-    } else if (this.language === 'java') {
-        prelude += 'import java.util.*;\n\n' +
-            'public class SnapExport {\n' +
-            '    public static void main(String[] args) {\n' +
-            '        // scripts below\n' +
-            '    }\n' +
-            '}\n\n';
-    }
-    return prelude + parts.join('\n');
+    return this.withTranslationContext(ide, function () {
+        var parts = [],
+            text,
+            stage,
+            out;
+
+        if (myself.scope === 'all') {
+            stage = ide.stage;
+            if (stage) {
+                text = myself.generateForSprite(stage);
+                if (text) { parts.push(text); }
+            }
+            if (ide.sprites && ide.sprites.asArray) {
+                ide.sprites.asArray().forEach(spr => {
+                    text = myself.generateForSprite(spr);
+                    if (text) { parts.push(text); }
+                });
+            }
+        } else {
+            text = myself.generateForSprite(ide.currentSprite || ide.stage);
+            if (text) { parts.push(text); }
+        }
+
+        if (!parts.length) {
+            return myself.prelude() + meta.empty;
+        }
+        out = myself.prelude() + parts.join('\n') + myself.epilogue();
+        return out;
+    });
 };
 
 // CodePaneMorph ///////////////////////////////////////////////////////
