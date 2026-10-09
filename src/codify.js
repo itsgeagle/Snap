@@ -2619,11 +2619,15 @@ SnapCodifier.specialEmitters = {
         return 'snap.text_attribute(' + choice + ', ' + text + ')';
     },
 
-    doDeclareVariables: function (block, defs) {
-        // script variables %scriptVars — MultiArg of TemplateSlots
-        var lang = this.language,
-            names = this.variadicArgs(block, defs).map(n => this.ident(n.replace(/['"]/g, ''))),
-            code;
+        doDeclareVariables: function (block, defs) {
+            // script variables %scriptVars — MultiArg of TemplateSlots
+            // TemplateSlotMorph.evaluate already sanitizes via ident();
+            // do not re-ident (that would create my_list vs my_list_2 collisions).
+            var lang = this.language,
+                names = this.variadicArgs(block, defs).map(n =>
+                    String(n).replace(/['"]/g, '')
+                ).filter(Boolean),
+                code;
         if (!names.length) {
             code = this.profile().comment + ' script variables';
         } else if (lang === 'python') {
@@ -2884,20 +2888,22 @@ SnapCodifier.collectDefinitions = function (ide) {
     return defs;
 };
 
-SnapCodifier.installCustomMappings = function (ide) {
-    var backups = [];
-    this.collectDefinitions(ide).forEach(def => {
-        var sig = this.functionSignature(def);
-        backups.push({
-            def: def,
-            codeMapping: def.codeMapping,
-            codeHeader: def.codeHeader
+    SnapCodifier.installCustomMappings = function (ide) {
+        var backups = [];
+        this.collectDefinitions(ide).forEach(def => {
+            var sig;
+            if (!def || !def.spec) { return; }
+            sig = this.functionSignature(def);
+            backups.push({
+                def: def,
+                codeMapping: def.codeMapping,
+                codeHeader: def.codeHeader
+            });
+            def.codeHeader = sig.header;
+            def.codeMapping = sig.call;
         });
-        def.codeHeader = sig.header;
-        def.codeMapping = sig.call;
-    });
-    this._customBackups = backups;
-};
+        this._customBackups = backups;
+    };
 
 SnapCodifier.restoreCustomMappings = function () {
     if (!this._customBackups) { return; }
@@ -2945,13 +2951,18 @@ SnapCodifier.ensureFallbacks = function (block) {
     }
 };
 
-SnapCodifier.mapBlock = function (block) {
-    if (!(block instanceof BlockMorph)) {
-        return '';
-    }
-    this.ensureFallbacks(block);
-    return block.mappedCode() || this.blockFallback(block);
-};
+    SnapCodifier.mapBlock = function (block) {
+        if (!(block instanceof BlockMorph)) {
+            return '';
+        }
+        try {
+            this.ensureFallbacks(block);
+            return block.mappedCode() || this.blockFallback(block);
+        } catch (err) {
+            return this.blockFallback(block) + '\n' +
+                this.profile().comment + ' export error: ' + err;
+        }
+    };
 
 SnapCodifier.scriptsOf = function (sprite) {
     if (!sprite || !sprite.scripts) {
@@ -3001,7 +3012,7 @@ SnapCodifier.withTranslationContext = function (ide, fn) {
     this.installCustomMappings(ide);
 
     BlockMorph.prototype.mappedCode = function (definitions) {
-        var code, next, emitter, defs;
+        var code, next, emitter, defs, sig;
         if (this.selector === 'reportGetVar') {
             code = myself.ident(this.blockSpec);
             if (this.nextBlock && this.nextBlock()) {
@@ -3010,14 +3021,39 @@ SnapCodifier.withTranslationContext = function (ide, fn) {
             }
             return code;
         }
+        // Local custom blocks null out .definition (Snap perf); resolve it.
+        if (this.isCustomBlock) {
+            var def = this.definition,
+                rcvr;
+            if (!def && typeof this.scriptTarget === 'function') {
+                rcvr = this.scriptTarget();
+                if (rcvr && typeof rcvr.getMethod === 'function') {
+                    def = rcvr.getMethod(this.semanticSpec || this.blockSpec);
+                }
+            }
+            if (!def) {
+                code = myself.profile().comment + ' [custom block]';
+                return myself.appendNext(this, definitions || {}, code);
+            }
+            if (!def.codeMapping) {
+                sig = myself.functionSignature(def);
+                def.codeHeader = sig.header;
+                def.codeMapping = sig.call;
+            }
+            // Temporarily restore definition for stock mappedCode / headers
+            if (!this.definition) {
+                this.definition = def;
+                try {
+                    code = origBlockMapped.call(this, definitions);
+                } finally {
+                    this.definition = null;
+                }
+                return code;
+            }
+        }
         emitter = myself.specialEmitters[this.selector];
         if (emitter) {
             defs = definitions || {};
-            // register headers for custom defs bookkeeping parity
-            if (!definitions) {
-                // top-level: let emitter run, then prepend collected headers
-                // by calling through a shim that still tracks defs
-            }
             code = emitter.call(myself, this, defs);
             if (!definitions) {
                 var headers = [];
@@ -3030,7 +3066,12 @@ SnapCodifier.withTranslationContext = function (ide, fn) {
             }
             return code;
         }
-        return origBlockMapped.call(this, definitions);
+        try {
+            return origBlockMapped.call(this, definitions);
+        } catch (err) {
+            code = myself.blockFallback(this);
+            return myself.appendNext(this, definitions || {}, code);
+        }
     };
 
     InputSlotMorph.prototype.mappedCode = function () {
