@@ -988,11 +988,15 @@ CodePaneMorph.prototype.build = function () {
     this.codeBody.enableSelecting();
     this.codeBody.maxWidth = 0;
 
-    this.scroller = new ScrollFrameMorph(this.codeBody, null, ide.sliderColor);
+    // ScrollFrameMorph expects a FrameMorph as contents; add the text into it.
+    this.scroller = new ScrollFrameMorph(null, null, ide.sliderColor);
     this.scroller.color = ide.isBright ?
         new Color(250, 250, 252) : new Color(24, 28, 24);
     this.scroller.acceptsDrops = false;
     this.scroller.contents.acceptsDrops = false;
+    this.scroller.isTextLineWrapping = true;
+    this.scroller.padding = 4;
+    this.scroller.setContents(this.codeBody);
     this.add(this.scroller);
 
     // Resize handle (bottom-right of pane)
@@ -1083,7 +1087,7 @@ CodePaneMorph.prototype.closePane = function () {
 
 CodePaneMorph.prototype.refresh = function (force) {
     var code;
-    if (!this.ide) { return; }
+    if (!this.ide || !this.codeBody || !this.scroller) { return; }
     code = SnapCodifier.generate(this.ide);
     if (!force && code === this.cachedCode) { return; }
     this.cachedCode = code;
@@ -1091,6 +1095,7 @@ CodePaneMorph.prototype.refresh = function (force) {
     this.codeBody.fixLayout();
     this.codeBody.changed();
     this.scroller.contents.adjustBounds();
+    this.scroller.adjustScrollBars();
     this.refreshButtonLabels();
 };
 
@@ -1108,7 +1113,7 @@ CodePaneMorph.prototype.fixLayout = function () {
         innerH,
         cursorX;
 
-    if (!this.header) { return; }
+    if (!this.header || !this.scroller || !this.codeBody) { return; }
 
     this.header.setPosition(new Point(x, y));
     this.header.setExtent(new Point(innerW, headerH));
@@ -1141,6 +1146,7 @@ CodePaneMorph.prototype.fixLayout = function () {
     );
     this.codeBody.fixLayout();
     this.scroller.contents.adjustBounds();
+    this.scroller.adjustScrollBars();
 };
 
 CodePaneMorph.prototype.setExtent = function (point) {
