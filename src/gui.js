@@ -3022,15 +3022,10 @@ IDE_Morph.prototype.fixLayout = function (situation) {
         if (this.codePane && this.isCodePaneOpen && !this.isAppMode &&
                 !this.performerMode && !this.isEmbedMode) {
             this.codePaneWidth = Math.max(300, this.codePaneWidth || 420);
-            // Prefer a smaller stage when the pane is open so scripts stay usable
-            if (!this.isSmallStage && this.stage.width() > 300) {
-                this.toggleStageSize(true);
-                return;
-            }
             this.codePane.show();
             this.codePane.setExtent(new Point(
                 this.codePaneWidth,
-                this.bottom() - this.stage.top() - border
+                Math.max(120, this.bottom() - this.stage.top() - border)
             ));
             this.codePane.setTop(this.stage.top());
             this.codePane.setRight(this.stage.left() - padding);
@@ -8058,6 +8053,11 @@ IDE_Morph.prototype.toggleCodePane = function (forceOpen) {
         this.createCodePane();
     }
     if (this.isCodePaneOpen) {
+        // Make room beside the scripts area
+        if (!this.isSmallStage) {
+            this.toggleStageSize(true);
+        }
+        this.codePaneWidth = Math.max(300, this.codePaneWidth || 420);
         this.codePane.show();
         this.codePane.refresh(true);
         this.showMessage(localize('Live code pane open'), 1);
