@@ -44,7 +44,7 @@ MultiArgMorph, CSlotMorph, BooleanSlotMorph, RingMorph, List, detect*/
 
 // Global stuff ////////////////////////////////////////////////////////
 
-modules.codify = '2026-October-10f';
+modules.codify = '2026-October-10g';
 
 var SnapCodifier;
 var CodePaneMorph;
@@ -1780,9 +1780,9 @@ SnapCodifier.buildMappings = function () {
     // Fallback templates (special emitters override when active)
     if (lang === 'python') {
         T.doForever = 'while True:\n    <#1>';
-        T.doRepeat = 'for _ in range(int(<#1>)):\n    <#2>';
+        T.doRepeat = 'for _ in range(<#1>):\n    <#2>';
         T.doUntil = 'while not (<#1>):\n    <#2>';
-        T.doFor = 'for <#1> in range(int(<#2>), int(<#3>) + 1):\n    <#4>';
+        T.doFor = 'for <#1> in range(<#2>, <#3> + 1):\n    <#4>';
         T.doForEach = 'for <#1> in <#2>:\n    <#3>';
         T.doIf = 'if <#1>:\n    <#2>';
         T.doIfElse = 'if <#1>:\n    <#2>\nelse:\n    <#3>';
@@ -1889,7 +1889,7 @@ SnapCodifier.buildMappings = function () {
         T.doInsertInList = '(<#3>).insert((<#2>) - 1, <#1>)';
         T.doReplaceInList = '(<#3>)[(<#2>) - 1] = <#1>';
         T.reportListIndex = '((<#2>).index(<#1>) + 1 if (<#1>) in (<#2>) else 0)';
-        T.reportNumbers = 'list(range(int(<#1>), int(<#2>) + 1))';
+        T.reportNumbers = 'list(range(<#1>, <#2> + 1))';
         T.reportNewList = T.list;
         T.reportCONS = '[<#1>] + list(<#2>)';
         T.reportCDR = 'list(<#1>)[1:]';
@@ -1932,7 +1932,7 @@ SnapCodifier.buildMappings = function () {
         T.reportModulus = '(<#1> % <#2>)';
         T.reportAtan2 = 'math.atan2(<#1>, <#2>)';
         T.reportRound = 'round(<#1>)';
-        T.reportRandom = 'random.randint(int(<#1>), int(<#2>))';
+        T.reportRandom = 'random.randint(<#1>, <#2>)';
         T.doSayFor = 'print(<#1>)';
         T.bubble = 'print(<#1>)';
         T.doThinkFor = 'print(<#1>)';
@@ -2308,6 +2308,19 @@ SnapCodifier.withMultiArgMode = function (mode, fn) {
     }
 };
 
+// Cast to int only when Snap may hand us a non-int (var / expression).
+// Bare integer literals stay bare: range(1, 10 + 1), not range(int(1), …).
+SnapCodifier.asIntExpr = function (code) {
+    var s = String(code == null ? '' : code).trim();
+    if (/^-?\d+$/.test(s)) {
+        return s;
+    }
+    if (/^int\(.+\)$/.test(s)) {
+        return s;
+    }
+    return 'int(' + s + ')';
+};
+
 // Snap ring empty-hole semantics (see Process.prototype.bindInputs):
 //   • no explicit formals → empty slots are implicit parameters
 //   • one call-arg (map/keep) → every hole gets that same arg
@@ -2578,7 +2591,8 @@ SnapCodifier.specialEmitters = {
             body = this.emptyOr(this.mapInput(block.inputs()[1], defs)),
             code;
         if (lang === 'python') {
-            code = 'for _ in range(int(' + n + ')):\n' + this.indentBlock(body, 4);
+            code = 'for _ in range(' + this.asIntExpr(n) + '):\n' +
+                this.indentBlock(body, 4);
         } else if (lang === 'lua') {
             code = 'for _ = 1, ' + n + ' do\n' + this.indentBlock(body, 4) + '\nend';
         } else if (lang === 'java') {
@@ -2616,8 +2630,8 @@ SnapCodifier.specialEmitters = {
             body = this.emptyOr(this.mapInput(block.inputs()[3], defs)),
             code;
         if (lang === 'python') {
-            code = 'for ' + v + ' in range(int(' + a + '), int(' + b +
-                ') + 1):\n' + this.indentBlock(body, 4);
+            code = 'for ' + v + ' in range(' + this.asIntExpr(a) + ', ' +
+                this.asIntExpr(b) + ' + 1):\n' + this.indentBlock(body, 4);
         } else if (lang === 'lua') {
             code = 'for ' + v + ' = ' + a + ', ' + b + ' do\n' +
                 this.indentBlock(body, 4) + '\nend';
@@ -2631,6 +2645,36 @@ SnapCodifier.specialEmitters = {
                 '; ' + v + '++) {\n' + this.indentBlock(body, 4) + '\n}';
         }
         return this.appendNext(block, defs, code);
+    },
+
+    reportNumbers: function (block, defs) {
+        var a = this.mapInput(block.inputs()[0], defs),
+            b = this.mapInput(block.inputs()[1], defs),
+            lang = this.language;
+        if (lang === 'python') {
+            return 'list(range(' + this.asIntExpr(a) + ', ' +
+                this.asIntExpr(b) + ' + 1))';
+        }
+        if (lang === 'javascript') {
+            return 'Array.from({length: (' + b + ')-(' + a +
+                ')+1}, (_,i)=>(' + a + ')+i)';
+        }
+        return 'snap.numbers(' + a + ', ' + b + ')';
+    },
+
+    reportRandom: function (block, defs) {
+        var a = this.mapInput(block.inputs()[0], defs),
+            b = this.mapInput(block.inputs()[1], defs),
+            lang = this.language;
+        if (lang === 'python') {
+            return 'random.randint(' + this.asIntExpr(a) + ', ' +
+                this.asIntExpr(b) + ')';
+        }
+        if (lang === 'javascript') {
+            return '(' + a + ' + Math.floor(Math.random() * ((' + b +
+                ') - (' + a + ') + 1)))';
+        }
+        return 'snap.random(' + a + ', ' + b + ')';
     },
 
     doForEach: function (block, defs) {
