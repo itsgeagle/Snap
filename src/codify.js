@@ -1879,65 +1879,192 @@ SnapCodifier.buildMappings = function () {
         T.reifyPredicate = T.reifyReporter;
     }
 
-    // Index-aware list/text via snap runtime (handles last/random/all)
-    T.reportListItem = 'snap.item(<#1>, <#2>)';
-    T.reportLetter = 'snap.letter(<#1>, <#2>)';
-    T.doDeleteFromList = 'snap.delete(<#1>, <#2>)' + semi;
-    T.doInsertInList = 'snap.insert(<#1>, <#2>, <#3>)' + semi;
-    T.doReplaceInList = 'snap.replace(<#2>, <#3>, <#1>)' + semi;
-    T.reportListIndex = 'snap.index_of(<#1>, <#2>)';
-    T.reportNumbers = 'snap.numbers(<#1>, <#2>)';
-    T.reportNewList = T.list;
-    T.reportCONS = 'snap.cons(<#1>, <#2>)';
-    T.reportCDR = 'snap.cdr(<#1>)';
-    T.reportListLength = 'snap.length(<#1>)';
-    T.reportListAttribute = 'snap.list_attribute(<#1>, <#2>)';
-    T.reportListContainsItem = 'snap.contains(<#1>, <#2>)';
-    T.reportListIsEmpty = 'snap.is_empty(<#1>)';
-    T.doAddToList = 'snap.add(<#1>, <#2>)' + semi;
-    T.reportConcatenatedLists = 'snap.append_lists(<#1>)';
-    T.reportMap = 'snap.map(<#1>, <#2>)';
-    T.reportKeep = 'snap.keep(<#1>, <#2>)';
-    T.reportFindFirst = 'snap.find_first(<#1>, <#2>)';
-    T.reportCombine = 'snap.combine(<#1>, <#2>)';
+    // Prefer idiomatic language forms (like Snap's "map to Python" codification).
+    // Special emitters refine these further; snap.* remains for stage-only primitives.
+    if (lang === 'python') {
+        T.reportListItem = '(<#2>)[(<#1>) - 1]';
+        T.reportLetter = 'str(<#2>)[(<#1>) - 1]';
+        T.doDeleteFromList = 'del (<#2>)[(<#1>) - 1]';
+        T.doInsertInList = '(<#3>).insert((<#2>) - 1, <#1>)';
+        T.doReplaceInList = '(<#3>)[(<#2>) - 1] = <#1>';
+        T.reportListIndex = '((<#2>).index(<#1>) + 1 if (<#1>) in (<#2>) else 0)';
+        T.reportNumbers = 'list(range(int(<#1>), int(<#2>) + 1))';
+        T.reportNewList = T.list;
+        T.reportCONS = '[<#1>] + list(<#2>)';
+        T.reportCDR = 'list(<#1>)[1:]';
+        T.reportListLength = 'len(<#1>)';
+        T.reportListAttribute = 'len(<#2>)';
+        T.reportListContainsItem = '((<#2>) in (<#1>))';
+        T.reportListIsEmpty = '(len(<#1>) == 0)';
+        T.doAddToList = '(<#2>).append(<#1>)';
+        T.reportConcatenatedLists = '(<#1>)';
+        T.reportMap = '[<#1>(x) for x in <#2>]';
+        T.reportKeep = '[x for x in <#2> if <#1>(x)]';
+        T.reportFindFirst = 'next((x for x in <#2> if <#1>(x)), None)';
+        T.reportCombine = 'reduce(<#2>, <#1>)';
+        T.reportJoinWords = '"".join([str(x) for x in [<#1>]])';
+        T.reportStringSize = 'len(str(<#1>))';
+        T.reportTextAttribute = 'len(str(<#2>))';
+        T.reportTextSplit = 'str(<#1>).split(<#2>)';
+        T.reportMonadic = 'snap.monadic(<#1>, <#2>)';
+        T.reportUnicode = 'ord(str(<#1>)[0])';
+        T.reportUnicodeAsLetter = 'chr(int(<#1>))';
+        T.reportIsA = 'isinstance(<#1>, <#2>)';
+        T.reportTypeOf = 'type(<#1>).__name__';
+        T.reportNot = '(not <#1>)';
+        T.reportVariadicSum = '(<#1>)';
+        T.reportVariadicProduct = '(<#1>)';
+        T.reportVariadicMin = 'min(<#1>)';
+        T.reportVariadicMax = 'max(<#1>)';
+        T.reportVariadicEquals = '(<#1>)';
+        T.reportVariadicNotEquals = '(<#1>)';
+        T.reportVariadicLessThan = '(<#1>)';
+        T.reportVariadicLessThanOrEquals = '(<#1>)';
+        T.reportVariadicGreaterThan = '(<#1>)';
+        T.reportVariadicGreaterThanOrEquals = '(<#1>)';
+        T.reportVariadicAnd = '(<#1>)';
+        T.reportVariadicOr = '(<#1>)';
+        T.reportVariadicIsIdentical = '(<#1>)';
+        T.reportDifference = '(<#1> - <#2>)';
+        T.reportQuotient = '(<#1> / <#2>)';
+        T.reportPower = '(<#1> ** <#2>)';
+        T.reportModulus = '(<#1> % <#2>)';
+        T.reportAtan2 = 'math.atan2(<#1>, <#2>)';
+        T.reportRound = 'round(<#1>)';
+        T.reportRandom = 'random.randint(int(<#1>), int(<#2>))';
+        T.doSayFor = 'print(<#1>)';
+        T.bubble = 'print(<#1>)';
+        T.doThinkFor = 'print(<#1>)';
+        T.doThink = 'print(<#1>)';
+        T.log = 'print(<#1>)';
+        T.alert = 'print(<#1>)';
+        T.doShowVar = 'print(<#1>)';
+        T.doHideVar = '';
+        T.doChangeVar = '<#1> += <#2>';
+        T.evaluate = '<#1>(<#2>)';
+        T.doRun = '<#1>(<#2>)';
+    } else if (lang === 'javascript') {
+        T.reportListItem = '(<#2>)[(<#1>) - 1]';
+        T.reportLetter = 'String(<#2>)[(<#1>) - 1]';
+        T.doDeleteFromList = '(<#2>).splice((<#1>) - 1, 1);';
+        T.doInsertInList = '(<#3>).splice((<#2>) - 1, 0, <#1>);';
+        T.doReplaceInList = '(<#3>)[(<#2>) - 1] = <#1>;';
+        T.reportListIndex = '((<#2>).indexOf(<#1>) + 1)';
+        T.reportNumbers = 'Array.from({length: (<#2>)-(<#1>)+1}, (_,i)=>(<#1>)+i)';
+        T.reportNewList = T.list;
+        T.reportCONS = '[<#1>, ...<#2>]';
+        T.reportCDR = '(<#1>).slice(1)';
+        T.reportListLength = '(<#1>).length';
+        T.reportListAttribute = '(<#2>).length';
+        T.reportListContainsItem = '(<#1>).includes(<#2>)';
+        T.reportListIsEmpty = '((<#1>).length === 0)';
+        T.doAddToList = '(<#2>).push(<#1>);';
+        T.reportConcatenatedLists = '[].concat(<#1>)';
+        T.reportMap = '(<#2>).map(<#1>)';
+        T.reportKeep = '(<#2>).filter(<#1>)';
+        T.reportFindFirst = '(<#2>).find(<#1>)';
+        T.reportCombine = '(<#1>).reduce(<#2>)';
+        T.reportJoinWords = '[<#1>].join("")';
+        T.reportStringSize = 'String(<#1>).length';
+        T.reportTextAttribute = 'String(<#2>).length';
+        T.reportTextSplit = 'String(<#1>).split(<#2>)';
+        T.reportMonadic = 'snap.monadic(<#1>, <#2>)';
+        T.reportUnicode = 'String(<#1>).charCodeAt(0)';
+        T.reportUnicodeAsLetter = 'String.fromCharCode(<#1>)';
+        T.reportIsA = 'snap.is_a(<#1>, <#2>)';
+        T.reportTypeOf = 'typeof <#1>';
+        T.reportNot = '!(<#1>)';
+        T.reportVariadicSum = '(<#1>)';
+        T.reportVariadicProduct = '(<#1>)';
+        T.reportVariadicMin = 'Math.min(<#1>)';
+        T.reportVariadicMax = 'Math.max(<#1>)';
+        T.reportVariadicEquals = '(<#1>)';
+        T.reportVariadicNotEquals = '(<#1>)';
+        T.reportVariadicLessThan = '(<#1>)';
+        T.reportVariadicLessThanOrEquals = '(<#1>)';
+        T.reportVariadicGreaterThan = '(<#1>)';
+        T.reportVariadicGreaterThanOrEquals = '(<#1>)';
+        T.reportVariadicAnd = '(<#1>)';
+        T.reportVariadicOr = '(<#1>)';
+        T.reportVariadicIsIdentical = '(<#1>)';
+        T.reportDifference = '(<#1> - <#2>)';
+        T.reportQuotient = '(<#1> / <#2>)';
+        T.reportPower = '(<#1> ** <#2>)';
+        T.reportModulus = '(<#1> % <#2>)';
+        T.reportAtan2 = 'Math.atan2(<#1>, <#2>)';
+        T.reportRound = 'Math.round(<#1>)';
+        T.reportRandom = '(<#1> + Math.floor(Math.random() * ((<#2>) - (<#1>) + 1)))';
+        T.doSayFor = 'console.log(<#1>);';
+        T.bubble = 'console.log(<#1>);';
+        T.doThinkFor = 'console.log(<#1>);';
+        T.doThink = 'console.log(<#1>);';
+        T.log = 'console.log(<#1>);';
+        T.alert = 'console.log(<#1>);';
+        T.doShowVar = 'console.log(<#1>);';
+        T.doHideVar = '';
+        T.evaluate = '<#1>(<#2>)';
+        T.doRun = '<#1>(<#2>);';
+    } else {
+        // Java / Lua: keep snap helpers for list/index oddities
+        T.reportListItem = 'snap.item(<#1>, <#2>)';
+        T.reportLetter = 'snap.letter(<#1>, <#2>)';
+        T.doDeleteFromList = 'snap.delete(<#1>, <#2>)' + semi;
+        T.doInsertInList = 'snap.insert(<#1>, <#2>, <#3>)' + semi;
+        T.doReplaceInList = 'snap.replace(<#2>, <#3>, <#1>)' + semi;
+        T.reportListIndex = 'snap.index_of(<#1>, <#2>)';
+        T.reportNumbers = 'snap.numbers(<#1>, <#2>)';
+        T.reportNewList = T.list;
+        T.reportCONS = 'snap.cons(<#1>, <#2>)';
+        T.reportCDR = 'snap.cdr(<#1>)';
+        T.reportListLength = 'snap.length(<#1>)';
+        T.reportListAttribute = 'snap.list_attribute(<#1>, <#2>)';
+        T.reportListContainsItem = 'snap.contains(<#1>, <#2>)';
+        T.reportListIsEmpty = 'snap.is_empty(<#1>)';
+        T.doAddToList = 'snap.add(<#1>, <#2>)' + semi;
+        T.reportConcatenatedLists = 'snap.append_lists(<#1>)';
+        T.reportMap = 'snap.map(<#1>, <#2>)';
+        T.reportKeep = 'snap.keep(<#1>, <#2>)';
+        T.reportFindFirst = 'snap.find_first(<#1>, <#2>)';
+        T.reportCombine = 'snap.combine(<#1>, <#2>)';
+        T.reportJoinWords = 'snap.join(<#1>)';
+        T.reportStringSize = 'snap.length(<#1>)';
+        T.reportTextAttribute = 'snap.text_attribute(<#1>, <#2>)';
+        T.reportTextSplit = 'snap.split(<#1>, <#2>)';
+        T.reportMonadic = 'snap.monadic(<#1>, <#2>)';
+        T.reportUnicode = 'snap.unicode_of(<#1>)';
+        T.reportUnicodeAsLetter = 'snap.unicode_as_letter(<#1>)';
+        T.reportIsA = 'snap.is_a(<#1>, <#2>)';
+        T.reportTypeOf = 'snap.type_of(<#1>)';
+        T.reportNot = 'snap.not_(<#1>)';
+        T.reportVariadicSum = 'snap.sum(<#1>)';
+        T.reportVariadicProduct = 'snap.product(<#1>)';
+        T.reportVariadicMin = 'snap.min(<#1>)';
+        T.reportVariadicMax = 'snap.max(<#1>)';
+        T.reportVariadicEquals = 'snap.equals(<#1>)';
+        T.reportVariadicNotEquals = 'snap.not_equals(<#1>)';
+        T.reportVariadicLessThan = 'snap.less(<#1>)';
+        T.reportVariadicLessThanOrEquals = 'snap.less_eq(<#1>)';
+        T.reportVariadicGreaterThan = 'snap.greater(<#1>)';
+        T.reportVariadicGreaterThanOrEquals = 'snap.greater_eq(<#1>)';
+        T.reportVariadicAnd = 'snap.both(<#1>)';
+        T.reportVariadicOr = 'snap.either(<#1>)';
+        T.reportVariadicIsIdentical = 'snap.identical(<#1>)';
+        T.reportDifference = 'snap.difference(<#1>, <#2>)';
+        T.reportQuotient = 'snap.quotient(<#1>, <#2>)';
+        T.reportPower = 'snap.power(<#1>, <#2>)';
+        T.reportModulus = 'snap.mod(<#1>, <#2>)';
+        T.reportAtan2 = 'snap.atan2(<#1>, <#2>)';
+        T.reportRound = 'snap.round(<#1>)';
+        T.reportRandom = 'snap.random(<#1>, <#2>)';
+    }
     T.reportAtomicMap = T.reportMap;
     T.reportAtomicKeep = T.reportKeep;
     T.reportAtomicFindFirst = T.reportFindFirst;
     T.reportAtomicCombine = T.reportCombine;
-    T.reportJoinWords = 'snap.join(<#1>)';
-    T.reportStringSize = 'snap.length(<#1>)';
-    T.reportTextAttribute = 'snap.text_attribute(<#1>, <#2>)';
-    T.reportTextSplit = 'snap.split(<#1>, <#2>)';
-    T.reportMonadic = 'snap.monadic(<#1>, <#2>)';
-    T.reportUnicode = 'snap.unicode_of(<#1>)';
-    T.reportUnicodeAsLetter = 'snap.unicode_as_letter(<#1>)';
-    T.reportIsA = 'snap.is_a(<#1>, <#2>)';
-    T.reportTypeOf = 'snap.type_of(<#1>)';
     T.reportBoolean = '<#1>';
     T.reportTrue = p.boolTrue;
     T.reportFalse = p.boolFalse;
-    T.reportNot = 'snap.not_(<#1>)';
     T.reportPipe = 'snap.pipe(<#1>, <#2>)';
-    T.reportVariadicSum = 'snap.sum(<#1>)';
-    T.reportVariadicProduct = 'snap.product(<#1>)';
-    T.reportVariadicMin = 'snap.min(<#1>)';
-    T.reportVariadicMax = 'snap.max(<#1>)';
-    T.reportVariadicEquals = 'snap.equals(<#1>)';
-    T.reportVariadicNotEquals = 'snap.not_equals(<#1>)';
-    T.reportVariadicLessThan = 'snap.less(<#1>)';
-    T.reportVariadicLessThanOrEquals = 'snap.less_eq(<#1>)';
-    T.reportVariadicGreaterThan = 'snap.greater(<#1>)';
-    T.reportVariadicGreaterThanOrEquals = 'snap.greater_eq(<#1>)';
-    T.reportVariadicAnd = 'snap.both(<#1>)';
-    T.reportVariadicOr = 'snap.either(<#1>)';
-    T.reportVariadicIsIdentical = 'snap.identical(<#1>)';
-    T.reportDifference = 'snap.difference(<#1>, <#2>)';
-    T.reportQuotient = 'snap.quotient(<#1>, <#2>)';
-    T.reportPower = 'snap.power(<#1>, <#2>)';
-    T.reportModulus = 'snap.mod(<#1>, <#2>)';
-    T.reportAtan2 = 'snap.atan2(<#1>, <#2>)';
-    T.reportRound = 'snap.round(<#1>)';
-    T.reportRandom = 'snap.random(<#1>, <#2>)';
 
     T.forward = 'snap.move(<#1>)' + (('cmd' === 'cmd') ? semi : '');
     T.turn = 'snap.turn_right(<#1>)' + (('cmd' === 'cmd') ? semi : '');
@@ -1956,10 +2083,12 @@ SnapCodifier.buildMappings = function () {
     T.xPosition = 'snap.x_position()' + (('rep' === 'cmd') ? semi : '');
     T.yPosition = 'snap.y_position()' + (('rep' === 'cmd') ? semi : '');
     T.direction = 'snap.direction';
-    T.doSayFor = 'snap.say(<#1>, <#2>)' + (('cmd' === 'cmd') ? semi : '');
-    T.bubble = 'snap.say(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    T.doThinkFor = 'snap.think(<#1>, <#2>)' + (('cmd' === 'cmd') ? semi : '');
-    T.doThink = 'snap.think(<#1>)' + (('cmd' === 'cmd') ? semi : '');
+    if (lang !== 'python' && lang !== 'javascript') {
+        T.doSayFor = 'snap.say(<#1>, <#2>)' + semi;
+        T.bubble = 'snap.say(<#1>)' + semi;
+        T.doThinkFor = 'snap.think(<#1>, <#2>)' + semi;
+        T.doThink = 'snap.think(<#1>)' + semi;
+    }
     T.doSwitchToCostume = 'snap.switch_costume(<#1>)' + (('cmd' === 'cmd') ? semi : '');
     T.doWearNextCostume = 'snap.next_costume()' + (('cmd' === 'cmd') ? semi : '');
     T.getCostumeIdx = 'snap.costume_number';
@@ -1975,8 +2104,10 @@ SnapCodifier.buildMappings = function () {
     T.reportShown = 'snap.is_shown()' + (('rep' === 'cmd') ? semi : '');
     T.goToLayer = 'snap.go_to_layer(<#1>)' + (('cmd' === 'cmd') ? semi : '');
     T.goBack = 'snap.go_back_layers(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    T.alert = 'snap.alert(<#1>, <#2>)' + (('cmd' === 'cmd') ? semi : '');
-    T.log = 'snap.say(<#1>, <#2>)' + (('cmd' === 'cmd') ? semi : '');
+    if (lang !== 'python' && lang !== 'javascript') {
+        T.alert = 'snap.alert(<#1>)' + semi;
+        T.log = 'snap.say(<#1>)' + semi;
+    }
     T.playSound = 'snap.play_sound(<#1>)' + (('cmd' === 'cmd') ? semi : '');
     T.doPlaySoundUntilDone = 'snap.play_sound_until_done(<#1>)' + (('cmd' === 'cmd') ? semi : '');
     T.doPlaySoundAtRate = 'snap.play_sound_at(<#1>, <#2>)' + (('cmd' === 'cmd') ? semi : '');
@@ -2042,36 +2173,28 @@ SnapCodifier.buildMappings = function () {
     T.reportRelationTo = 'snap.relation(<#1>, <#2>)' + (('rep' === 'cmd') ? semi : '');
     T.reportAudio = 'snap.microphone(<#1>)' + (('rep' === 'cmd') ? semi : '');
     T.reportVideo = 'snap.video(<#1>, <#2>)' + (('rep' === 'cmd') ? semi : '');
-    T.doShowVar = 'snap.show_variable(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    T.doHideVar = 'snap.hide_variable(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    T.doTellTo = 'snap.tell(<#1>, <#2>)' + (('cmd' === 'cmd') ? semi : '');
-    T.reportAskFor = 'snap.ask_for(<#1>, <#2>, <#3>)' + (('rep' === 'cmd') ? semi : '');
-    T.doSwitchToScene = 'snap.switch_scene(<#1>, <#2>)' + (('cmd' === 'cmd') ? semi : '');
-    T.reportDifference = 'snap.difference(<#1>, <#2>)' + (('rep' === 'cmd') ? semi : '');
-    T.reportQuotient = 'snap.quotient(<#1>, <#2>)' + (('rep' === 'cmd') ? semi : '');
-    T.reportRound = 'snap.round(<#1>)' + (('rep' === 'cmd') ? semi : '');
-    T.reportPower = 'snap.power(<#1>, <#2>)' + (('rep' === 'cmd') ? semi : '');
-    T.reportModulus = 'snap.mod(<#1>, <#2>)' + (('rep' === 'cmd') ? semi : '');
-    T.reportAtan2 = 'snap.atan2(<#1>, <#2>)' + (('rep' === 'cmd') ? semi : '');
-    T.reportRandom = 'snap.random(<#1>, <#2>)' + (('rep' === 'cmd') ? semi : '');
-    T.reportNot = 'snap.not_(<#1>)' + (('rep' === 'cmd') ? semi : '');
-    T.reportUnicode = 'snap.unicode_of(<#1>)' + (('rep' === 'cmd') ? semi : '');
-    T.reportUnicodeAsLetter = 'snap.unicode_as_letter(<#1>)' + (('rep' === 'cmd') ? semi : '');
-    T.reportTypeOf = 'snap.type_of(<#1>)' + (('rep' === 'cmd') ? semi : '');
-    T.reportCONS = 'snap.cons(<#1>, <#2>)' + (('rep' === 'cmd') ? semi : '');
-    T.reportCDR = 'snap.cdr(<#1>)' + (('rep' === 'cmd') ? semi : '');
-    T.reportListLength = 'snap.length(<#1>)' + (('rep' === 'cmd') ? semi : '');
-    T.reportListContainsItem = 'snap.contains(<#1>, <#2>)' + (('rep' === 'cmd') ? semi : '');
-    T.reportListIsEmpty = 'snap.is_empty(<#1>)' + (('rep' === 'cmd') ? semi : '');
-    T.reportListIndex = 'snap.index_of(<#1>, <#2>)' + (('rep' === 'cmd') ? semi : '');
-    T.doAddToList = 'snap.add(<#1>, <#2>)' + (('cmd' === 'cmd') ? semi : '');
-    T.reportNumbers = 'snap.numbers(<#1>, <#2>)' + (('rep' === 'cmd') ? semi : '');
-    T.reportStringSize = 'snap.length(<#1>)' + (('rep' === 'cmd') ? semi : '');
-    T.reportHyperZip = 'snap.hyper_zip(<#1>, <#2>, <#3>, <#4>, <#5>, <#6>, <#7>)' + (('rep' === 'cmd') ? semi : '');
+    if (lang !== 'python' && lang !== 'javascript') {
+        T.doShowVar = 'snap.show_variable(<#1>)' + semi;
+        T.doHideVar = 'snap.hide_variable(<#1>)' + semi;
+    }
+    T.doTellTo = 'snap.tell(<#1>, <#2>)' + semi;
+    T.reportAskFor = 'snap.ask_for(<#1>, <#2>, <#3>)';
+    T.doSwitchToScene = 'snap.switch_scene(<#1>, <#2>)' + semi;
+    T.reportHyperZip = 'snap.hyper_zip(<#1>, <#2>, <#3>, <#4>, <#5>, <#6>, <#7>)';
     T.doSetVar = '<#1> = <#2>' + semi;
-    T.doChangeVar = lang === 'javascript' ? '<#1> += <#2>;' :
-        (lang === 'java' ? '<#1> = ((Number)<#1>).doubleValue() + ((Number)(<#2>)).doubleValue();' :
-            '<#1> = (<#1>) + (<#2>)');
+    if (lang === 'java') {
+        T.doChangeVar = '<#1> = ((Number)<#1>).doubleValue() + ((Number)(<#2>)).doubleValue();';
+    } else if (lang === 'javascript') {
+        T.doChangeVar = '<#1> += <#2>;';
+    } else if (lang === 'python') {
+        T.doChangeVar = '<#1> += <#2>';
+    } else {
+        T.doChangeVar = '<#1> = (<#1>) + (<#2>)';
+    }
+    if (lang !== 'python' && lang !== 'javascript') {
+        T.evaluate = 'snap.call(<#1>, <#2>)';
+        T.doRun = 'snap.run(<#1>, <#2>)' + semi;
+    }
     T.reportGetImageAttribute = 'snap.get_image_attribute(<#1>, <#2>)' + (('rep' === 'cmd') ? semi : '');
     T.reportNewCostume = 'snap.new_costume(<#1>, <#2>, <#3>)' + (('rep' === 'cmd') ? semi : '');
     T.reportNewCostumeStretched = 'snap.new_costume_stretched(<#1>, <#2>, <#3>)' + (('rep' === 'cmd') ? semi : '');
@@ -2464,91 +2587,119 @@ SnapCodifier.specialEmitters = {
         return this.emitRing(block, defs, 'reporter');
     },
 
+    bubble: function (block, defs) {
+        return this.emitPrint(block, defs);
+    },
+    doSayFor: function (block, defs) {
+        return this.emitPrint(block, defs);
+    },
+    doThink: function (block, defs) {
+        return this.emitPrint(block, defs);
+    },
+    doThinkFor: function (block, defs) {
+        return this.emitPrint(block, defs);
+    },
+    log: function (block, defs) {
+        return this.emitPrint(block, defs);
+    },
+    alert: function (block, defs) {
+        return this.emitPrint(block, defs);
+    },
+    doAddToList: function (block, defs) {
+        var val = this.mapInput(block.inputs()[0], defs),
+            list = this.mapInput(block.inputs()[1], defs),
+            lang = this.language,
+            semi = (lang === 'javascript' || lang === 'java') ? ';' : '',
+            code;
+        if (lang === 'python') {
+            code = '(' + list + ').append(' + val + ')';
+        } else if (lang === 'javascript') {
+            code = '(' + list + ').push(' + val + ');';
+        } else {
+            code = 'snap.add(' + val + ', ' + list + ')' + semi;
+        }
+        return this.appendNext(block, defs, code);
+    },
+
     reportListItem: function (block, defs) {
-        var idx = this.mapInput(block.inputs()[0], defs),
-            list = this.mapInput(block.inputs()[1], defs);
-        return 'snap.item(' + idx + ', ' + list + ')';
+        return this.emitIndexRead(block, defs, 'item');
     },
     reportLetter: function (block, defs) {
-        var idx = this.mapInput(block.inputs()[0], defs),
-            text = this.mapInput(block.inputs()[1], defs);
-        return 'snap.letter(' + idx + ', ' + text + ')';
+        return this.emitIndexRead(block, defs, 'letter');
     },
     doDeleteFromList: function (block, defs) {
-        var semi = (this.language === 'javascript' || this.language === 'java') ? ';' : '',
-            idx = this.mapInput(block.inputs()[0], defs),
-            list = this.mapInput(block.inputs()[1], defs);
-        return this.appendNext(
-            block,
-            defs,
-            'snap.delete(' + idx + ', ' + list + ')' + semi
-        );
+        return this.emitIndexMutate(block, defs, 'delete');
     },
     doInsertInList: function (block, defs) {
-        var semi = (this.language === 'javascript' || this.language === 'java') ? ';' : '',
-            val = this.mapInput(block.inputs()[0], defs),
-            idx = this.mapInput(block.inputs()[1], defs),
-            list = this.mapInput(block.inputs()[2], defs);
-        return this.appendNext(
-            block,
-            defs,
-            'snap.insert(' + val + ', ' + idx + ', ' + list + ')' + semi
-        );
+        return this.emitIndexMutate(block, defs, 'insert');
     },
     doReplaceInList: function (block, defs) {
-        // Snap order: replace item %idx of %l with %s → inputs idx, list, value
-        var semi = (this.language === 'javascript' || this.language === 'java') ? ';' : '',
-            idx = this.mapInput(block.inputs()[0], defs),
-            list = this.mapInput(block.inputs()[1], defs),
-            val = this.mapInput(block.inputs()[2], defs);
-        return this.appendNext(
-            block,
-            defs,
-            'snap.replace(' + idx + ', ' + list + ', ' + val + ')' + semi
-        );
+        return this.emitIndexMutate(block, defs, 'replace');
     },
 
     reportVariadicSum: function (block, defs) {
-        return this.emitVariadicCall(block, defs, 'sum');
+        return this.emitInfix(block, defs, '+', 'sum');
     },
     reportVariadicProduct: function (block, defs) {
-        return this.emitVariadicCall(block, defs, 'product');
+        return this.emitInfix(block, defs, '*', 'product');
     },
     reportVariadicMin: function (block, defs) {
-        return this.emitVariadicCall(block, defs, 'min');
+        return this.emitBuiltinCall(block, defs, 'min', 'min');
     },
     reportVariadicMax: function (block, defs) {
-        return this.emitVariadicCall(block, defs, 'max');
+        return this.emitBuiltinCall(block, defs, 'max', 'max');
     },
     reportVariadicEquals: function (block, defs) {
-        return this.emitVariadicCall(block, defs, 'equals');
+        return this.emitInfix(block, defs,
+            this.language === 'javascript' ? '===' : '==', 'equals');
     },
     reportVariadicNotEquals: function (block, defs) {
-        return this.emitVariadicCall(block, defs, 'not_equals');
+        return this.emitInfix(block, defs,
+            this.language === 'javascript' ? '!==' : '!=', 'not_equals');
     },
     reportVariadicLessThan: function (block, defs) {
-        return this.emitVariadicCall(block, defs, 'less');
+        return this.emitInfix(block, defs, '<', 'less');
     },
     reportVariadicLessThanOrEquals: function (block, defs) {
-        return this.emitVariadicCall(block, defs, 'less_eq');
+        return this.emitInfix(block, defs, '<=', 'less_eq');
     },
     reportVariadicGreaterThan: function (block, defs) {
-        return this.emitVariadicCall(block, defs, 'greater');
+        return this.emitInfix(block, defs, '>', 'greater');
     },
     reportVariadicGreaterThanOrEquals: function (block, defs) {
-        return this.emitVariadicCall(block, defs, 'greater_eq');
+        return this.emitInfix(block, defs, '>=', 'greater_eq');
     },
     reportVariadicAnd: function (block, defs) {
-        return this.emitVariadicCall(block, defs, 'both');
+        return this.emitInfix(block, defs,
+            this.language === 'python' || this.language === 'lua' ? 'and' : '&&',
+            'both');
     },
     reportVariadicOr: function (block, defs) {
-        return this.emitVariadicCall(block, defs, 'either');
+        return this.emitInfix(block, defs,
+            this.language === 'python' || this.language === 'lua' ? 'or' : '||',
+            'either');
     },
     reportVariadicIsIdentical: function (block, defs) {
-        return this.emitVariadicCall(block, defs, 'identical');
+        if (this.language === 'python') {
+            return this.emitInfix(block, defs, 'is', 'identical');
+        }
+        return this.emitInfix(block, defs, '===', 'identical');
     },
 
     reportJoinWords: function (block, defs) {
+        var args = this.variadicArgs(block, defs),
+            lang = this.language;
+        if (!args.length) {
+            return lang === 'python' ? '""' : (lang === 'lua' ? '""' : '""');
+        }
+        if (lang === 'python') {
+            if (args.length === 1) { return 'str(' + args[0] + ')'; }
+            return '(' + args.map(a => 'str(' + a + ')').join(' + ') + ')';
+        }
+        if (lang === 'javascript') {
+            return args.length === 1 ? 'String(' + args[0] + ')' :
+                '[' + args.join(', ') + '].join("")';
+        }
         return this.emitVariadicCall(block, defs, 'join');
     },
     reportNewList: function (block, defs) {
@@ -2562,6 +2713,14 @@ SnapCodifier.specialEmitters = {
         return '[' + args.join(', ') + ']';
     },
     reportConcatenatedLists: function (block, defs) {
+        var args = this.variadicArgs(block, defs),
+            lang = this.language;
+        if (lang === 'python') {
+            return args.length ? ('(' + args.map(a => 'list(' + a + ')').join(' + ') + ')') : '[]';
+        }
+        if (lang === 'javascript') {
+            return '[].concat(' + args.join(', ') + ')';
+        }
         return this.emitVariadicCall(block, defs, 'append_lists');
     },
     reportPipe: function (block, defs) {
@@ -2571,13 +2730,55 @@ SnapCodifier.specialEmitters = {
     },
 
     reportMonadic: function (block, defs) {
-        var op = this.mapInput(block.inputs()[0], defs),
-            n = this.mapInput(block.inputs()[1], defs);
-        // menu constants often stringify without quotes — ensure quoted op
-        if (op && op.charAt(0) !== '"' && op.charAt(0) !== "'") {
-            op = this.quote(op);
+        var raw = block.inputs()[0] ? block.inputs()[0].evaluate() : '',
+            key = raw instanceof Array ? String(raw[0]) : String(raw),
+            n = this.mapInput(block.inputs()[1], defs),
+            lang = this.language,
+            table;
+        if (lang === 'python') {
+            table = {
+                abs: 'abs(' + n + ')',
+                neg: '(-' + n + ')',
+                ceiling: 'math.ceil(' + n + ')',
+                floor: 'math.floor(' + n + ')',
+                sqrt: 'math.sqrt(' + n + ')',
+                sin: 'math.sin(math.radians(' + n + '))',
+                cos: 'math.cos(math.radians(' + n + '))',
+                tan: 'math.tan(math.radians(' + n + '))',
+                asin: 'math.degrees(math.asin(' + n + '))',
+                acos: 'math.degrees(math.acos(' + n + '))',
+                atan: 'math.degrees(math.atan(' + n + '))',
+                ln: 'math.log(' + n + ')',
+                log: 'math.log10(' + n + ')',
+                'e^': 'math.exp(' + n + ')',
+                '10^': '(10 ** ' + n + ')',
+                '2^': '(2 ** ' + n + ')',
+                id: '(' + n + ')',
+                round: 'round(' + n + ')'
+            };
+            return table[key] || ('snap.monadic(' + this.quote(key) + ', ' + n + ')');
         }
-        return 'snap.monadic(' + op + ', ' + n + ')';
+        if (lang === 'javascript') {
+            table = {
+                abs: 'Math.abs(' + n + ')',
+                neg: '(-' + n + ')',
+                ceiling: 'Math.ceil(' + n + ')',
+                floor: 'Math.floor(' + n + ')',
+                sqrt: 'Math.sqrt(' + n + ')',
+                sin: 'Math.sin(' + n + ' * Math.PI / 180)',
+                cos: 'Math.cos(' + n + ' * Math.PI / 180)',
+                tan: 'Math.tan(' + n + ' * Math.PI / 180)',
+                ln: 'Math.log(' + n + ')',
+                log: 'Math.log10(' + n + ')',
+                'e^': 'Math.exp(' + n + ')',
+                '10^': '(10 ** ' + n + ')',
+                '2^': '(2 ** ' + n + ')',
+                id: '(' + n + ')',
+                round: 'Math.round(' + n + ')'
+            };
+            return table[key] || ('snap.monadic(' + this.quote(key) + ', ' + n + ')');
+        }
+        return 'snap.monadic(' + this.quote(key) + ', ' + n + ')';
     },
 
     reportBoolean: function (block, defs) {
@@ -2589,34 +2790,52 @@ SnapCodifier.specialEmitters = {
 
     reportIsA: function (block, defs) {
         var v = this.mapInput(block.inputs()[0], defs),
-            t = this.mapInput(block.inputs()[1], defs);
-        if (t && t.charAt(0) !== '"' && t.charAt(0) !== "'") {
-            t = this.quote(t);
+            raw = block.inputs()[1] ? block.inputs()[1].evaluate() : '',
+            key = raw instanceof Array ? String(raw[0]) : String(raw),
+            lang = this.language;
+        key = key.toLowerCase();
+        if (lang === 'python') {
+            if (key === 'number') {
+                return 'isinstance(' + v + ', (int, float)) and not isinstance(' +
+                    v + ', bool)';
+            }
+            if (key === 'text') { return 'isinstance(' + v + ', str)'; }
+            if (key === 'list') { return 'isinstance(' + v + ', list)'; }
+            if (key === 'boolean') { return 'isinstance(' + v + ', bool)'; }
         }
-        return 'snap.is_a(' + v + ', ' + t + ')';
+        return 'snap.is_a(' + v + ', ' + this.quote(key) + ')';
     },
 
     reportTextSplit: function (block, defs) {
         var text = this.mapInput(block.inputs()[0], defs),
-            delim = this.mapInput(block.inputs()[1], defs);
+            delim = this.mapInput(block.inputs()[1], defs),
+            lang = this.language;
+        if (lang === 'python') {
+            return 'str(' + text + ').split(' + delim + ')';
+        }
+        if (lang === 'javascript') {
+            return 'String(' + text + ').split(' + delim + ')';
+        }
         return 'snap.split(' + text + ', ' + delim + ')';
     },
 
     reportListAttribute: function (block, defs) {
-        var choice = this.mapInput(block.inputs()[0], defs),
-            list = this.mapInput(block.inputs()[1], defs);
-        if (choice && choice.charAt(0) !== '"' && choice.charAt(0) !== "'") {
-            choice = this.quote(choice);
+        var list = this.mapInput(block.inputs()[1], defs),
+            raw = block.inputs()[0] ? block.inputs()[0].evaluate() : 'length',
+            key = raw instanceof Array ? String(raw[0]) : String(raw),
+            lang = this.language;
+        if (String(key) === 'length' || !key) {
+            if (lang === 'python') { return 'len(' + list + ')'; }
+            if (lang === 'javascript') { return '(' + list + ').length'; }
         }
-        return 'snap.list_attribute(' + choice + ', ' + list + ')';
+        return 'snap.list_attribute(' + this.quote(key) + ', ' + list + ')';
     },
     reportTextAttribute: function (block, defs) {
-        var choice = this.mapInput(block.inputs()[0], defs),
-            text = this.mapInput(block.inputs()[1], defs);
-        if (choice && choice.charAt(0) !== '"' && choice.charAt(0) !== "'") {
-            choice = this.quote(choice);
-        }
-        return 'snap.text_attribute(' + choice + ', ' + text + ')';
+        var text = this.mapInput(block.inputs()[1], defs),
+            lang = this.language;
+        if (lang === 'python') { return 'len(str(' + text + '))'; }
+        if (lang === 'javascript') { return 'String(' + text + ').length'; }
+        return 'snap.text_attribute("length", ' + text + ')';
     },
 
         doDeclareVariables: function (block, defs) {
@@ -2660,30 +2879,46 @@ SnapCodifier.specialEmitters = {
     },
 
     reportMap: function (block, defs) {
-        return 'snap.map(' + this.mapInput(block.inputs()[0], defs) + ', ' +
-            this.mapInput(block.inputs()[1], defs) + ')';
+        return this.emitMapKeep(block, defs, 'map');
     },
     reportAtomicMap: function (block, defs) {
         return this.specialEmitters.reportMap.call(this, block, defs);
     },
     reportKeep: function (block, defs) {
-        return 'snap.keep(' + this.mapInput(block.inputs()[0], defs) + ', ' +
-            this.mapInput(block.inputs()[1], defs) + ')';
+        return this.emitMapKeep(block, defs, 'keep');
     },
     reportAtomicKeep: function (block, defs) {
         return this.specialEmitters.reportKeep.call(this, block, defs);
     },
     reportFindFirst: function (block, defs) {
-        return 'snap.find_first(' + this.mapInput(block.inputs()[0], defs) +
-            ', ' + this.mapInput(block.inputs()[1], defs) + ')';
+        var ring = block.inputs()[0],
+            list = this.mapInput(block.inputs()[1], defs),
+            parts = this.ringParts(ring, defs),
+            lang = this.language;
+        if (lang === 'python' && parts) {
+            return 'next((' + parts.param + ' for ' + parts.param +
+                ' in ' + list + ' if ' + parts.body + '), None)';
+        }
+        if (lang === 'javascript') {
+            return '(' + list + ').find(' + this.mapInput(ring, defs) + ')';
+        }
+        return 'snap.find_first(' + this.mapInput(ring, defs) + ', ' + list + ')';
     },
     reportAtomicFindFirst: function (block, defs) {
         return this.specialEmitters.reportFindFirst.call(this, block, defs);
     },
     reportCombine: function (block, defs) {
-        // combine %l using %repRing
-        return 'snap.combine(' + this.mapInput(block.inputs()[0], defs) +
-            ', ' + this.mapInput(block.inputs()[1], defs) + ')';
+        // combine %l using %repRing  →  reduce(ring, list)
+        var list = this.mapInput(block.inputs()[0], defs),
+            ring = this.mapInput(block.inputs()[1], defs),
+            lang = this.language;
+        if (lang === 'python') {
+            return 'reduce(' + ring + ', ' + list + ')';
+        }
+        if (lang === 'javascript') {
+            return '(' + list + ').reduce(' + ring + ')';
+        }
+        return 'snap.combine(' + list + ', ' + ring + ')';
     },
     reportAtomicCombine: function (block, defs) {
         return this.specialEmitters.reportCombine.call(this, block, defs);
@@ -2693,7 +2928,13 @@ SnapCodifier.specialEmitters = {
         var semi = (this.language === 'javascript' || this.language === 'java') ? ';' : '',
             ring = this.mapInput(block.inputs()[0], defs),
             args = this.variadicArgsFrom(block.inputs()[1], defs),
+            call,
+            lang = this.language;
+        if (lang === 'python' || lang === 'javascript') {
+            call = ring + '(' + args.join(', ') + ')' + semi;
+        } else {
             call = 'snap.run(' + [ring].concat(args).join(', ') + ')' + semi;
+        }
         return this.appendNext(block, defs, call);
     },
     fork: function (block, defs) {
@@ -2705,7 +2946,11 @@ SnapCodifier.specialEmitters = {
     },
     evaluate: function (block, defs) {
         var ring = this.mapInput(block.inputs()[0], defs),
-            args = this.variadicArgsFrom(block.inputs()[1], defs);
+            args = this.variadicArgsFrom(block.inputs()[1], defs),
+            lang = this.language;
+        if (lang === 'python' || lang === 'javascript') {
+            return ring + '(' + args.join(', ') + ')';
+        }
         return 'snap.call(' + [ring].concat(args).join(', ') + ')';
     },
 
@@ -2751,6 +2996,216 @@ SnapCodifier.variadicArgs = function (block, defs) {
 SnapCodifier.emitVariadicCall = function (block, defs, fn) {
     var args = this.variadicArgs(block, defs);
     return 'snap.' + fn + '(' + args.join(', ') + ')';
+};
+
+SnapCodifier.emitInfix = function (block, defs, op, snapFn) {
+    var args = this.variadicArgs(block, defs),
+        lang = this.language;
+    if (!args.length) {
+        return lang === 'python' ? 'None' : 'null';
+    }
+    if (args.length === 1) {
+        return '(' + args[0] + ')';
+    }
+    // Idiomatic infix for Python / JS / Lua; Java falls back to snap.*
+    if (lang === 'java') {
+        return this.emitVariadicCall(block, defs, snapFn);
+    }
+    return '(' + args.join(' ' + op + ' ') + ')';
+};
+
+SnapCodifier.emitBuiltinCall = function (block, defs, pyName, snapFn) {
+    var args = this.variadicArgs(block, defs),
+        lang = this.language;
+    if (lang === 'python') {
+        return pyName + '(' + args.join(', ') + ')';
+    }
+    if (lang === 'javascript') {
+        return 'Math.' + pyName + '(' + args.join(', ') + ')';
+    }
+    return this.emitVariadicCall(block, defs, snapFn);
+};
+
+SnapCodifier.optionKey = function (slot) {
+    var val;
+    if (!slot || typeof slot.evaluate !== 'function') { return null; }
+    val = slot.evaluate();
+    if (val instanceof Array) { return String(val[0]); }
+    if (typeof val === 'string' &&
+            contains(['last', 'any', 'random', 'all', 'parent'], val)) {
+        return val;
+    }
+    return null;
+};
+
+SnapCodifier.emitIndexRead = function (block, defs, kind) {
+    var idxSlot = block.inputs()[0],
+        col = this.mapInput(block.inputs()[1], defs),
+        idx = this.mapInput(idxSlot, defs),
+        key = this.optionKey(idxSlot),
+        lang = this.language;
+
+    if (lang === 'python') {
+        if (kind === 'letter') {
+            col = 'str(' + col + ')';
+        }
+        if (key === 'last') { return '(' + col + ')[-1]'; }
+        if (key === 'any' || key === 'random') {
+            return 'random.choice(' + col + ')';
+        }
+        return '(' + col + ')[(' + idx + ') - 1]';
+    }
+    if (lang === 'javascript') {
+        if (kind === 'letter') {
+            if (key === 'last') {
+                return 'String(' + col + ').slice(-1)';
+            }
+            if (key === 'any' || key === 'random') {
+                return 'String(' + col + ')[Math.floor(Math.random()*String(' +
+                    col + ').length)]';
+            }
+            return 'String(' + col + ')[(' + idx + ') - 1]';
+        }
+        if (key === 'last') { return '(' + col + ').at(-1)'; }
+        if (key === 'any' || key === 'random') {
+            return '(' + col + ')[Math.floor(Math.random()*(' + col + ').length)]';
+        }
+        return '(' + col + ')[(' + idx + ') - 1]';
+    }
+    return kind === 'letter' ?
+        ('snap.letter(' + idx + ', ' + col + ')') :
+        ('snap.item(' + idx + ', ' + col + ')');
+};
+
+SnapCodifier.emitIndexMutate = function (block, defs, kind) {
+    var semi = (this.language === 'javascript' || this.language === 'java') ? ';' : '',
+        lang = this.language,
+        code;
+
+    if (kind === 'delete') {
+        var idxSlot = block.inputs()[0],
+            list = this.mapInput(block.inputs()[1], defs),
+            idx = this.mapInput(idxSlot, defs),
+            key = this.optionKey(idxSlot);
+        if (lang === 'python') {
+            if (key === 'all') { code = '(' + list + ').clear()'; }
+            else if (key === 'last') { code = '(' + list + ').pop()'; }
+            else { code = 'del (' + list + ')[(' + idx + ') - 1]'; }
+        } else if (lang === 'javascript') {
+            if (key === 'all') { code = '(' + list + ').length = 0;'; }
+            else if (key === 'last') { code = '(' + list + ').pop();'; }
+            else { code = '(' + list + ').splice((' + idx + ') - 1, 1);'; }
+        } else {
+            code = 'snap.delete(' + idx + ', ' + list + ')' + semi;
+        }
+        return this.appendNext(block, defs, code);
+    }
+
+    if (kind === 'insert') {
+        var val = this.mapInput(block.inputs()[0], defs),
+            idxSlot2 = block.inputs()[1],
+            list2 = this.mapInput(block.inputs()[2], defs),
+            idx2 = this.mapInput(idxSlot2, defs),
+            key2 = this.optionKey(idxSlot2);
+        if (lang === 'python') {
+            if (key2 === 'last') {
+                code = '(' + list2 + ').append(' + val + ')';
+            } else {
+                code = '(' + list2 + ').insert((' + idx2 + ') - 1, ' + val + ')';
+            }
+        } else if (lang === 'javascript') {
+            if (key2 === 'last') {
+                code = '(' + list2 + ').push(' + val + ');';
+            } else {
+                code = '(' + list2 + ').splice((' + idx2 + ') - 1, 0, ' + val + ');';
+            }
+        } else {
+            code = 'snap.insert(' + val + ', ' + idx2 + ', ' + list2 + ')' + semi;
+        }
+        return this.appendNext(block, defs, code);
+    }
+
+    // replace: inputs idx, list, value
+    var idxSlot3 = block.inputs()[0],
+        list3 = this.mapInput(block.inputs()[1], defs),
+        val3 = this.mapInput(block.inputs()[2], defs),
+        idx3 = this.mapInput(idxSlot3, defs),
+        key3 = this.optionKey(idxSlot3);
+    if (lang === 'python') {
+        if (key3 === 'last') {
+            code = '(' + list3 + ')[-1] = ' + val3;
+        } else {
+            code = '(' + list3 + ')[(' + idx3 + ') - 1] = ' + val3;
+        }
+    } else if (lang === 'javascript') {
+        if (key3 === 'last') {
+            code = '(' + list3 + ')[(' + list3 + ').length - 1] = ' + val3 + ';';
+        } else {
+            code = '(' + list3 + ')[(' + idx3 + ') - 1] = ' + val3 + ';';
+        }
+    } else {
+        code = 'snap.replace(' + idx3 + ', ' + list3 + ', ' + val3 + ')' + semi;
+    }
+    return this.appendNext(block, defs, code);
+};
+
+SnapCodifier.ringParts = function (ring, defs) {
+    // Pull parameter name + body out of a reify* ring for list comps.
+    var parmsSlot, bodySlot, parms, body, param;
+    if (!ring || !ring.selector || ring.selector.substr(0, 5) !== 'reify') {
+        return null;
+    }
+    bodySlot = ring.inputs()[0];
+    parmsSlot = ring.inputs()[1];
+    parms = this.variadicArgsFrom(parmsSlot, defs)
+        .map(p => this.ident(String(p).replace(/['"]/g, '')));
+    param = parms[0] || 'x';
+    body = this.mapInput(bodySlot, defs);
+    if (!body && body !== 0) { body = param; }
+    return {param: param, body: body, parms: parms};
+};
+
+SnapCodifier.emitPrint = function (block, defs) {
+    var msg = this.mapInput(block.inputs()[0], defs),
+        lang = this.language,
+        code;
+    if (lang === 'python') {
+        code = 'print(' + msg + ')';
+    } else if (lang === 'javascript') {
+        code = 'console.log(' + msg + ');';
+    } else if (lang === 'lua') {
+        code = 'print(' + msg + ')';
+    } else {
+        code = 'System.out.println(' + msg + ');';
+    }
+    return this.appendNext(block, defs, code);
+};
+
+SnapCodifier.emitMapKeep = function (block, defs, kind) {
+    var ring = block.inputs()[0],
+        list = this.mapInput(block.inputs()[1], defs),
+        parts = this.ringParts(ring, defs),
+        lang = this.language,
+        ringCode;
+
+    if (lang === 'python' && parts) {
+        if (kind === 'map') {
+            return '[' + parts.body + ' for ' + parts.param + ' in ' + list + ']';
+        }
+        // keep
+        return '[' + parts.param + ' for ' + parts.param + ' in ' + list +
+            ' if ' + parts.body + ']';
+    }
+    if (lang === 'javascript') {
+        ringCode = this.mapInput(ring, defs);
+        return kind === 'map' ?
+            '(' + list + ').map(' + ringCode + ')' :
+            '(' + list + ').filter(' + ringCode + ')';
+    }
+    ringCode = this.mapInput(ring, defs);
+    return kind === 'map' ?
+        ('snap.map(' + ringCode + ', ' + list + ')') :
+        ('snap.keep(' + ringCode + ', ' + list + ')');
 };
 
 SnapCodifier.emitRing = function (block, defs, kind) {
@@ -3174,6 +3629,14 @@ SnapCodifier.titleLine = function () {
     return p.comment + ' ' + p.label + ' from your Snap! blocks';
 };
 
+SnapCodifier.studentImports = function () {
+    // Small stdlib imports so idiomatic output runs without the snap helpers.
+    if (this.language === 'python') {
+        return 'import math\nimport random\nfrom functools import reduce\n';
+    }
+    return '';
+};
+
 SnapCodifier.helpersBanner = function () {
     return this.profile().comment +
         ' Helpers (needed to run this file — you can ignore the details)';
@@ -3232,7 +3695,7 @@ SnapCodifier.generate = function (ide, options) {
             if (text) { parts.push(text); }
         }
 
-        // Student-facing: short title, then their code. No jargon banners.
+        // Student-facing: short title, light imports, then their code.
         out = myself.titleLine() + '\n\n';
         if (!parts.length) {
             return out + meta.empty;
@@ -3252,6 +3715,10 @@ SnapCodifier.generate = function (ide, options) {
             return out;
         }
 
+        var imports = myself.studentImports();
+        if (imports) {
+            out += imports + '\n';
+        }
         if (withHelpers) {
             out += myself.runtimeBlock() + '\n\n';
         }
