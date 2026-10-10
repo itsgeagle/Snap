@@ -3005,11 +3005,11 @@ SnapCodifier.specialEmitters = {
         if (parts && parts.parms.length) {
             if (lang === 'python') {
                 return 'reduce((lambda ' + parts.parms.join(', ') +
-                    ': (' + parts.body + ')), ' + list + ')';
+                    ': ' + parts.body + '), ' + list + ')';
             }
             if (lang === 'javascript') {
                 return '(' + list + ').reduce((' + parts.parms.join(', ') +
-                    ') => (' + parts.body + '))';
+                    ') => ' + parts.body + ')';
             }
         }
         ring = this.mapInput(ringMorph, defs);
