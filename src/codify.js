@@ -44,7 +44,7 @@ MultiArgMorph, CSlotMorph, BooleanSlotMorph, RingMorph, List, detect*/
 
 // Global stuff ////////////////////////////////////////////////////////
 
-modules.codify = '2026-October-10';
+modules.codify = '2026-October-10f';
 
 var SnapCodifier;
 var CodePaneMorph;
@@ -57,6 +57,7 @@ SnapCodifier = {
     _identCache: null,
     _customBackups: null,
     _multiArgMode: null, // temporarily overrides MultiArg join style
+    _holeBindings: null, // Map<slotMorph, paramName> while mapping ring bodies
 
     languages: {
         python: {
@@ -2307,6 +2308,88 @@ SnapCodifier.withMultiArgMode = function (mode, fn) {
     }
 };
 
+// Snap ring empty-hole semantics (see Process.prototype.bindInputs):
+//   • no explicit formals → empty slots are implicit parameters
+//   • one call-arg (map/keep) → every hole gets that same arg
+//   • several call-args (combine) → holes bind left-to-right
+SnapCodifier.emptySlotsOfRing = function (ring) {
+    var expr, slot;
+    if (!ring) { return []; }
+    if (typeof ring.contents === 'function') {
+        expr = ring.contents();
+    }
+    if (!expr && typeof ring.inputs === 'function') {
+        slot = ring.inputs()[0];
+        if (slot && typeof slot.nestedBlock === 'function') {
+            expr = slot.nestedBlock();
+        } else if (slot && typeof slot.allEmptySlots === 'function') {
+            return slot.allEmptySlots();
+        }
+    }
+    if (!expr || typeof expr.allEmptySlots !== 'function') {
+        return [];
+    }
+    return expr.allEmptySlots();
+};
+
+SnapCodifier.implicitParamNames = function (count, mode) {
+    var letters = 'abcdefghijklmnopqrstuvwxyz',
+        names = [],
+        i;
+    if (mode === 'same' || count < 1) {
+        return [this.ident('x')];
+    }
+    for (i = 0; i < count; i += 1) {
+        if (i < letters.length) {
+            names.push(this.ident(letters.charAt(i)));
+        } else {
+            names.push(this.ident('p' + (i + 1)));
+        }
+    }
+    return names;
+};
+
+SnapCodifier.withHoleBindings = function (bindings, fn) {
+    var prev = this._holeBindings;
+    this._holeBindings = bindings;
+    try {
+        return fn.call(this);
+    } finally {
+        this._holeBindings = prev;
+    }
+};
+
+SnapCodifier.resolveRingFormals = function (ring, explicitParms, mode) {
+    // Returns {parms, slots, bindings}. Explicit ring inputs win; otherwise
+    // invent formals from empty holes (Snap's implicit-parameter rule).
+    var slots = this.emptySlotsOfRing(ring),
+        parms = (explicitParms || []).slice(),
+        bindings = null,
+        names,
+        i;
+
+    if (parms.length > 0 || !slots.length) {
+        return {parms: parms, slots: slots, bindings: null};
+    }
+
+    if (mode === 'same') {
+        names = this.implicitParamNames(1, 'same');
+        parms = names.slice();
+        bindings = new Map();
+        for (i = 0; i < slots.length; i += 1) {
+            bindings.set(slots[i], names[0]);
+        }
+    } else {
+        names = this.implicitParamNames(slots.length, 'sequential');
+        parms = names.slice();
+        bindings = new Map();
+        for (i = 0; i < slots.length; i += 1) {
+            bindings.set(slots[i], names[i]);
+        }
+    }
+    return {parms: parms, slots: slots, bindings: bindings};
+};
+
 SnapCodifier.joinMapped = function (inputs, defs, delim) {
     var myself = this;
     return inputs.map(inp => myself.mapInput(inp, defs)).join(delim);
@@ -2893,11 +2976,15 @@ SnapCodifier.specialEmitters = {
     reportFindFirst: function (block, defs) {
         var ring = block.inputs()[0],
             list = this.mapInput(block.inputs()[1], defs),
-            parts = this.ringParts(ring, defs),
+            parts = this.ringParts(ring, defs, 'same'),
             lang = this.language;
         if (lang === 'python' && parts) {
             return 'next((' + parts.param + ' for ' + parts.param +
                 ' in ' + list + ' if ' + parts.body + '), None)';
+        }
+        if (lang === 'javascript' && parts) {
+            return '(' + list + ').find((' + parts.param + ') => (' +
+                parts.body + '))';
         }
         if (lang === 'javascript') {
             return '(' + list + ').find(' + this.mapInput(ring, defs) + ')';
@@ -2909,9 +2996,23 @@ SnapCodifier.specialEmitters = {
     },
     reportCombine: function (block, defs) {
         // combine %l using %repRing  →  reduce(ring, list)
+        // Empty holes bind left-to-right (accumulator, item, …).
         var list = this.mapInput(block.inputs()[0], defs),
-            ring = this.mapInput(block.inputs()[1], defs),
+            ringMorph = block.inputs()[1],
+            parts = this.ringParts(ringMorph, defs, 'sequential'),
+            ring,
             lang = this.language;
+        if (parts && parts.parms.length) {
+            if (lang === 'python') {
+                return 'reduce((lambda ' + parts.parms.join(', ') +
+                    ': (' + parts.body + ')), ' + list + ')';
+            }
+            if (lang === 'javascript') {
+                return '(' + list + ').reduce((' + parts.parms.join(', ') +
+                    ') => (' + parts.body + '))';
+            }
+        }
+        ring = this.mapInput(ringMorph, defs);
         if (lang === 'python') {
             return 'reduce(' + ring + ', ' + list + ')';
         }
@@ -3149,18 +3250,28 @@ SnapCodifier.emitIndexMutate = function (block, defs, kind) {
     return this.appendNext(block, defs, code);
 };
 
-SnapCodifier.ringParts = function (ring, defs) {
-    // Pull parameter name + body out of a reify* ring for list comps.
-    var parmsSlot, bodySlot, parms, body, param;
+SnapCodifier.ringParts = function (ring, defs, mode) {
+    // Pull parameter name + body out of a reify* ring for list comps / reduce.
+    // mode: 'same' (map/keep — every hole is the item) | 'sequential' (combine)
+    var parmsSlot, bodySlot, parms, body, param, resolved, holeMode;
     if (!ring || !ring.selector || ring.selector.substr(0, 5) !== 'reify') {
         return null;
     }
+    holeMode = mode || 'same';
     bodySlot = ring.inputs()[0];
     parmsSlot = ring.inputs()[1];
     parms = this.variadicArgsFrom(parmsSlot, defs)
         .map(p => this.ident(String(p).replace(/['"]/g, '')));
-    param = parms[0] || 'x';
-    body = this.mapInput(bodySlot, defs);
+    resolved = this.resolveRingFormals(ring, parms, holeMode);
+    parms = resolved.parms;
+    param = parms[0] || this.ident('x');
+    if (resolved.bindings) {
+        body = this.withHoleBindings(resolved.bindings, () =>
+            this.mapInput(bodySlot, defs)
+        );
+    } else {
+        body = this.mapInput(bodySlot, defs);
+    }
     if (!body && body !== 0) { body = param; }
     return {param: param, body: body, parms: parms};
 };
@@ -3184,25 +3295,34 @@ SnapCodifier.emitPrint = function (block, defs) {
 SnapCodifier.emitMapKeep = function (block, defs, kind) {
     var ring = block.inputs()[0],
         list = this.mapInput(block.inputs()[1], defs),
-        parts = this.ringParts(ring, defs),
+        parts = this.ringParts(ring, defs, 'same'),
         lang = this.language,
         ringCode;
 
-    if (lang === 'python' && parts) {
-        if (kind === 'map') {
-            return '[' + parts.body + ' for ' + parts.param + ' in ' + list + ']';
+    if (parts) {
+        if (lang === 'python') {
+            if (kind === 'map') {
+                return '[' + parts.body + ' for ' + parts.param +
+                    ' in ' + list + ']';
+            }
+            return '[' + parts.param + ' for ' + parts.param + ' in ' + list +
+                ' if ' + parts.body + ']';
         }
-        // keep
-        return '[' + parts.param + ' for ' + parts.param + ' in ' + list +
-            ' if ' + parts.body + ']';
+        if (lang === 'javascript') {
+            if (kind === 'map') {
+                return '(' + list + ').map((' + parts.param + ') => (' +
+                    parts.body + '))';
+            }
+            return '(' + list + ').filter((' + parts.param + ') => (' +
+                parts.body + '))';
+        }
     }
+    ringCode = this.mapInput(ring, defs);
     if (lang === 'javascript') {
-        ringCode = this.mapInput(ring, defs);
         return kind === 'map' ?
             '(' + list + ').map(' + ringCode + ')' :
             '(' + list + ').filter(' + ringCode + ')';
     }
-    ringCode = this.mapInput(ring, defs);
     return kind === 'map' ?
         ('snap.map(' + ringCode + ', ' + list + ')') :
         ('snap.keep(' + ringCode + ', ' + list + ')');
@@ -3215,48 +3335,55 @@ SnapCodifier.emitRing = function (block, defs, kind) {
         parmsSlot = inputs[1],
         parms,
         body,
-        code;
+        code,
+        resolved,
+        paramList;
 
     parms = this.variadicArgsFrom(parmsSlot, defs)
         .map(p => this.ident(String(p).replace(/['"]/g, '')));
-    // Body: ring slot / C-slot / reporter slot
-    body = this.mapInput(bodySlot, defs);
+    // Standalone rings: empty holes → sequential implicit formals (a, b, …)
+    resolved = this.resolveRingFormals(block, parms, 'sequential');
+    parms = resolved.parms;
+    if (resolved.bindings) {
+        body = this.withHoleBindings(resolved.bindings, () =>
+            this.mapInput(bodySlot, defs)
+        );
+    } else {
+        body = this.mapInput(bodySlot, defs);
+    }
     if (kind === 'script') {
         body = this.emptyOr(body);
     }
+    paramList = parms.join(', ');
 
     if (lang === 'python') {
         if (kind === 'script') {
-            code = '(lambda ' + parms.join(', ') +
-                ': snap.script(lambda: (\\n' +
-                this.indentBlock(body, 4) + '\\n)))';
-            // fix: use real newlines
-            code = '(lambda ' + parms.join(', ') +
+            code = '(lambda ' + paramList +
                 ': snap.script(lambda: (\n' +
                 this.indentBlock(body, 4) + '\n)))';
         } else {
-            code = '(lambda ' + parms.join(', ') + ': (' + body + '))';
+            code = '(lambda ' + paramList + ': (' + body + '))';
         }
     } else if (lang === 'javascript') {
         if (kind === 'script') {
-            code = '((' + parms.join(', ') + ') => {\n' +
+            code = '((' + paramList + ') => {\n' +
                 this.indentBlock(body, 4) + '\n})';
         } else {
-            code = '((' + parms.join(', ') + ') => (' + body + '))';
+            code = '((' + paramList + ') => (' + body + '))';
         }
     } else if (lang === 'java') {
         if (kind === 'script') {
-            code = '((' + parms.join(', ') + ') -> {\n' +
+            code = '((' + paramList + ') -> {\n' +
                 this.indentBlock(body, 4) + '\n})';
         } else {
-            code = '((' + parms.join(', ') + ') -> (' + body + '))';
+            code = '((' + paramList + ') -> (' + body + '))';
         }
     } else { // lua
         if (kind === 'script') {
-            code = '(function(' + parms.join(', ') + ')\n' +
+            code = '(function(' + paramList + ')\n' +
                 this.indentBlock(body, 4) + '\nend)';
         } else {
-            code = '(function(' + parms.join(', ') +
+            code = '(function(' + paramList +
                 ') return ' + body + ' end)';
         }
     }
@@ -3531,9 +3658,14 @@ SnapCodifier.withTranslationContext = function (ide, fn) {
 
     InputSlotMorph.prototype.mappedCode = function () {
         var block = this.parentThatIsA(BlockMorph),
-            val = this.evaluate(),
+            val,
             opt,
             mapped;
+        // Empty ring holes → bound implicit formals (not numeric 0 / '')
+        if (myself._holeBindings && myself._holeBindings.has(this)) {
+            return myself._holeBindings.get(this);
+        }
+        val = this.evaluate();
         if (block && contains(
                 ['doSetVar', 'doChangeVar', 'doShowVar', 'doHideVar'],
                 block.selector
@@ -3598,7 +3730,11 @@ SnapCodifier.withTranslationContext = function (ide, fn) {
     };
 
     BooleanSlotMorph.prototype.mappedCode = function () {
-        var val = this.evaluate();
+        var val;
+        if (myself._holeBindings && myself._holeBindings.has(this)) {
+            return myself._holeBindings.get(this);
+        }
+        val = this.evaluate();
         if (val === true) { return myself.profile().boolTrue; }
         if (val === false) { return myself.profile().boolFalse; }
         return origBoolMapped.call(this);
