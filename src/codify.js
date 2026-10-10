@@ -72,7 +72,7 @@ SnapCodifier = {
             andOp: 'and',
             orOp: 'or',
             notOp: 'not ',
-            empty: '# (no scripts yet — add blocks to see Python here)\n',
+            empty: '# Add blocks on the left to see your Python code here.\n',
             reserved: [
                 'False', 'None', 'True', 'and', 'as', 'assert', 'async',
                 'await', 'break', 'class', 'continue', 'def', 'del', 'elif',
@@ -97,7 +97,7 @@ SnapCodifier = {
             andOp: '&&',
             orOp: '||',
             notOp: '!',
-            empty: '// (no scripts yet — add blocks to see JavaScript here)\n',
+            empty: '// Add blocks on the left to see your JavaScript code here.\n',
             reserved: [
                 'break', 'case', 'catch', 'class', 'const', 'continue',
                 'debugger', 'default', 'delete', 'do', 'else', 'export',
@@ -121,7 +121,7 @@ SnapCodifier = {
             andOp: '&&',
             orOp: '||',
             notOp: '!',
-            empty: '// (no scripts yet — add blocks to see Java here)\n',
+            empty: '// Add blocks on the left to see your Java code here.\n',
             reserved: [
                 'abstract', 'assert', 'boolean', 'break', 'byte', 'case',
                 'catch', 'char', 'class', 'const', 'continue', 'default',
@@ -148,7 +148,7 @@ SnapCodifier = {
             andOp: 'and',
             orOp: 'or',
             notOp: 'not ',
-            empty: '-- (no scripts yet — add blocks to see Lua here)\n',
+            empty: '-- Add blocks on the left to see your Lua code here.\n',
             reserved: [
                 'and', 'break', 'do', 'else', 'elseif', 'end', 'false',
                 'for', 'function', 'goto', 'if', 'in', 'local', 'nil',
@@ -2982,7 +2982,7 @@ SnapCodifier.generateForSprite = function (sprite) {
     if (!scripts.length) {
         return '';
     }
-    header = meta.comment + ' sprite: ' + (sprite.name || 'Sprite');
+    header = meta.comment + ' ' + (sprite.name || 'Sprite');
     scripts.forEach(script => {
         body = this.mapBlock(script);
         if (body && String(body).trim()) {
@@ -3169,40 +3169,22 @@ SnapCodifier.withTranslationContext = function (ide, fn) {
     return result;
 };
 
-SnapCodifier.prelude = function () {
-    var p = this.profile(),
-        lang = this.language,
-        lines = [],
-        runtime;
+SnapCodifier.titleLine = function () {
+    var p = this.profile();
+    return p.comment + ' ' + p.label + ' from your Snap! blocks';
+};
 
-    lines.push(p.comment + ' Generated live from Snap!  →  ' + p.label);
-    lines.push(p.comment + ' Full-parity export: indexing, hyperops, rings,');
-    lines.push(p.comment + ' else-if, variadics, script vars, custom blocks.');
-    lines.push(p.comment +
-        ' Names with spaces are sanitized (e.g. "my var" → my_var).');
-    if (p.indexBase === 0) {
-        lines.push(p.comment +
-            ' Indexing: Snap 1-based → 0-based via snap.item/letter/...');
-    } else {
-        lines.push(p.comment +
-            ' Indexing: Snap and Lua are both 1-based.');
-    }
-    lines.push('');
+SnapCodifier.helpersBanner = function () {
+    return this.profile().comment +
+        ' Helpers (needed to run this file — you can ignore the details)';
+};
 
-    runtime = this.runtimes[lang] || '';
-    if (lang === 'java') {
-        // runtime already includes imports + Snap class + instance
-        lines.push(runtime);
-        lines.push('');
-        lines.push('public class SnapExport {');
-        lines.push('    public static void main(String[] args) {');
-        lines.push('        // scripts below');
-        lines.push('');
-    } else {
-        lines.push(runtime);
-        lines.push('');
+SnapCodifier.runtimeBlock = function () {
+    var runtime = this.runtimes[this.language] || '';
+    if (!runtime) {
+        return '';
     }
-    return lines.join('\n');
+    return this.helpersBanner() + '\n' + runtime;
 };
 
 SnapCodifier.epilogue = function () {
@@ -3212,19 +3194,26 @@ SnapCodifier.epilogue = function () {
     return '';
 };
 
-SnapCodifier.generate = function (ide) {
+// options.helpers:
+//   false / 'none'  — live pane (default): just the student's scripts
+//   true  / 'start' — export/copy: helpers first so the file can run
+SnapCodifier.generate = function (ide, options) {
     var meta = this.profile(),
-        myself = this;
+        myself = this,
+        opts = options || {},
+        withHelpers = opts.helpers === true || opts.helpers === 'start';
 
     if (!ide) {
-        return meta.empty;
+        return this.titleLine() + '\n\n' + meta.empty;
     }
 
     return this.withTranslationContext(ide, function () {
         var parts = [],
             text,
             stage,
-            out;
+            body,
+            out,
+            lang = myself.language;
 
         if (myself.scope === 'all') {
             stage = ide.stage;
@@ -3243,10 +3232,33 @@ SnapCodifier.generate = function (ide) {
             if (text) { parts.push(text); }
         }
 
+        // Student-facing: short title, then their code. No jargon banners.
+        out = myself.titleLine() + '\n\n';
         if (!parts.length) {
-            return myself.prelude() + meta.empty;
+            return out + meta.empty;
         }
-        out = myself.prelude() + parts.join('\n') + myself.epilogue();
+        body = parts.join('\n').replace(/^\n+/, '');
+
+        if (lang === 'java') {
+            if (withHelpers) {
+                out += myself.runtimeBlock() + '\n\n';
+            }
+            out += 'public class SnapExport {\n';
+            out += '    public static void main(String[] args) {\n\n';
+            out += body.split('\n').map(line =>
+                line.length ? '        ' + line : ''
+            ).join('\n');
+            out += myself.epilogue();
+            return out;
+        }
+
+        if (withHelpers) {
+            out += myself.runtimeBlock() + '\n\n';
+        }
+        out += body;
+        if (!out.endsWith('\n')) {
+            out += '\n';
+        }
         return out;
     });
 };
@@ -3446,8 +3458,13 @@ CodePaneMorph.prototype.toggleScope = function () {
     this.fixLayout();
 };
 
+CodePaneMorph.prototype.codeForExport = function () {
+    // Include helpers so copied/exported files can run outside Snap!
+    return SnapCodifier.generate(this.ide, {helpers: true});
+};
+
 CodePaneMorph.prototype.copyCode = function () {
-    var text = this.cachedCode || '',
+    var text = this.codeForExport(),
         ide = this.ide;
     if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text).then(
@@ -3478,11 +3495,12 @@ CodePaneMorph.prototype.exportCode = function () {
         ide = this.ide,
         name = (ide.getProjectName && ide.getProjectName()) || 'snap-export',
         safe = SnapCodifier.sanitizeIdentifier(name),
+        text = this.codeForExport(),
         blob,
         fileName = safe + '.' + meta.ext;
     try {
         blob = new Blob(
-            [this.cachedCode || ''],
+            [text],
             {type: meta.mime + ';charset=utf-8'}
         );
         if (typeof saveAs === 'function') {
@@ -3493,7 +3511,7 @@ CodePaneMorph.prototype.exportCode = function () {
     } catch (err) {
         // fall through to IDE helper
     }
-    ide.saveFileAs(this.cachedCode || '', 'text/plain;charset=utf-8', safe);
+    ide.saveFileAs(text, 'text/plain;charset=utf-8', safe);
 };
 
 CodePaneMorph.prototype.closePane = function () {
