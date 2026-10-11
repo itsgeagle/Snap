@@ -1584,7 +1584,7 @@ IDE_Morph.prototype.createControlBar = function () {
     button.labelShadowColor = colors[1];
     button.labelColor = this.buttonLabelColor;
     button.contrast = this.buttonContrast;
-    button.hint = 'live code view\n(Python & more)';
+    button.hint = 'live code view\n(Python, Scheme & more)';
     button.fixLayout();
     button.refresh();
     this.controlBar.add(button);

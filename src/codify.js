@@ -44,7 +44,7 @@ MultiArgMorph, CSlotMorph, BooleanSlotMorph, RingMorph, List, detect*/
 
 // Global stuff ////////////////////////////////////////////////////////
 
-modules.codify = '2026-October-10g';
+modules.codify = '2026-October-11a';
 
 var SnapCodifier;
 var CodePaneMorph;
@@ -155,6 +155,30 @@ SnapCodifier = {
                 'for', 'function', 'goto', 'if', 'in', 'local', 'nil',
                 'not', 'or', 'repeat', 'return', 'then', 'true', 'until',
                 'while', 'snap'
+            ]
+        },
+        scheme: {
+            label: 'Scheme',
+            ext: 'scm',
+            mime: 'text/x-scheme',
+            comment: ';',
+            indexBase: 0,
+            emptyBody: "'()",
+            boolTrue: '#t',
+            boolFalse: '#f',
+            nullLit: "'()",
+            andOp: 'and',
+            orOp: 'or',
+            notOp: 'not',
+            empty: '; Add blocks on the left to see your Scheme code here.\n',
+            reserved: [
+                'and', 'begin', 'case', 'cond', 'define', 'delay', 'do',
+                'else', 'if', 'lambda', 'let', 'let*', 'letrec', 'or',
+                'quasiquote', 'quote', 'set!', 'unquote', 'unquote-splicing',
+                'not', 'eq?', 'eqv?', 'equal?', 'list', 'cons', 'car', 'cdr',
+                'map', 'filter', 'foldl', 'display', 'displayln', 'newline',
+                'forward', 'right', 'left', 'pen-up', 'pen-down', 'clear',
+                'snap'
             ]
         }
     }
@@ -1766,14 +1790,15 @@ SnapCodifier.buildMappings = function () {
     T.boolTrue = p.boolTrue;
     T.boolFalse = p.boolFalse;
     T.reify = '<#1>';
-    T.delim = ', ';
+    T.delim = lang === 'scheme' ? ' ' : ', ';
     T.item = '<#1>';
     T.list = lang === 'lua' ? '{<#1>}' :
-        (lang === 'java' ? 'java.util.List.of(<#1>)' : '[<#1>]');
-    T.parms_delim = ', ';
+        (lang === 'java' ? 'java.util.List.of(<#1>)' :
+            (lang === 'scheme' ? '(list <#1>)' : '[<#1>]'));
+    T.parms_delim = lang === 'scheme' ? ' ' : ', ';
     T.parms_item = '<#1>';
     T.parms_list = '<#1>';
-    T.tempvars_delim = ', ';
+    T.tempvars_delim = lang === 'scheme' ? ' ' : ', ';
     T.tempvars_item = '<#1>';
     T.tempvars_list = '<#1>';
 
@@ -1852,6 +1877,31 @@ SnapCodifier.buildMappings = function () {
         T.doWarp = '<#1>';
         T.reifyScript = '((<#2>) -> {\n    <#1>\n})';
         T.reifyReporter = '((<#2>) -> (<#1>))';
+        T.reifyPredicate = T.reifyReporter;
+    } else if (lang === 'scheme') {
+        T.doForever = '(let loop ()\n  <#1>\n  (loop))';
+        T.doRepeat = '(do ((_i 0 (+ _i 1)))\n    ((= _i <#1>))\n  <#2>)';
+        T.doUntil = '(do ()\n    (<#1>)\n  <#2>)';
+        T.doFor = '(do ((<#1> <#2> (+ <#1> 1)))\n    ((> <#1> <#3>))\n  <#4>)';
+        T.doForEach = '(for-each\n  (lambda (<#1>)\n    <#3>)\n  <#2>)';
+        T.doIf = '(when <#1>\n  <#2>)';
+        T.doIfElse = '(if <#1>\n    <#2>\n    <#3>)';
+        T.reportIfElse = '(if <#1> <#2> <#3>)';
+        T.doReport = '<#1>';
+        T.doStopThis = "'()";
+        T.doDeclareVariables = '(define <#1> #f)';
+        T.doSetVar = '(set! <#1> <#2>)';
+        T.doChangeVar = '(set! <#1> (+ <#1> <#2>))';
+        T.doWait = '(snap-wait <#1>)';
+        T.doWaitUntil = '(snap-wait-until (lambda () <#1>))';
+        T.doBroadcast = '(snap-broadcast <#1>)';
+        T.doBroadcastAndWait = '(snap-broadcast-and-wait <#1>)';
+        T.doRun = '(<#1> <#2>)';
+        T.fork = '(snap-launch <#1> <#2>)';
+        T.evaluate = '(<#1> <#2>)';
+        T.doWarp = '<#1>';
+        T.reifyScript = '(lambda (<#2>)\n  <#1>)';
+        T.reifyReporter = '(lambda (<#2>) <#1>)';
         T.reifyPredicate = T.reifyReporter;
     } else { // lua
         T.doForever = 'while true do\n    <#1>\nend';
@@ -2005,6 +2055,67 @@ SnapCodifier.buildMappings = function () {
         T.doHideVar = '';
         T.evaluate = '<#1>(<#2>)';
         T.doRun = '<#1>(<#2>);';
+    } else if (lang === 'scheme') {
+        T.reportListItem = '(list-ref <#2> (- <#1> 1))';
+        T.reportLetter = '(string-ref (if (string? <#2>) <#2> (format "~a" <#2>)) (- <#1> 1))';
+        T.doDeleteFromList = '(snap-delete <#1> <#2>)';
+        T.doInsertInList = '(snap-insert <#1> <#2> <#3>)';
+        T.doReplaceInList = '(snap-replace <#2> <#3> <#1>)';
+        T.reportListIndex = '(snap-index-of <#1> <#2>)';
+        T.reportNumbers = '(range <#1> <#2>)';
+        T.reportNewList = T.list;
+        T.reportCONS = '(cons <#1> <#2>)';
+        T.reportCDR = '(cdr <#1>)';
+        T.reportListLength = '(length <#1>)';
+        T.reportListAttribute = '(length <#2>)';
+        T.reportListContainsItem = '(member <#2> <#1>)';
+        T.reportListIsEmpty = '(null? <#1>)';
+        T.doAddToList = '(snap-add <#1> <#2>)';
+        T.reportConcatenatedLists = '(append <#1>)';
+        T.reportMap = '(map <#1> <#2>)';
+        T.reportKeep = '(filter <#1> <#2>)';
+        T.reportFindFirst = '(findf <#1> <#2>)';
+        T.reportCombine = '(foldl <#2> (car <#1>) (cdr <#1>))';
+        T.reportJoinWords = '(string-append <#1>)';
+        T.reportStringSize = '(string-length (format "~a" <#1>))';
+        T.reportTextAttribute = '(string-length (format "~a" <#2>))';
+        T.reportTextSplit = '(snap-split <#1> <#2>)';
+        T.reportMonadic = '(snap-monadic <#1> <#2>)';
+        T.reportUnicode = '(char->integer (string-ref (format "~a" <#1>) 0))';
+        T.reportUnicodeAsLetter = '(string (integer->char <#1>))';
+        T.reportIsA = '(snap-is-a? <#1> <#2>)';
+        T.reportTypeOf = '(snap-type-of <#1>)';
+        T.reportNot = '(not <#1>)';
+        T.reportVariadicSum = '(+ <#1>)';
+        T.reportVariadicProduct = '(* <#1>)';
+        T.reportVariadicMin = '(min <#1>)';
+        T.reportVariadicMax = '(max <#1>)';
+        T.reportVariadicEquals = '(equal? <#1>)';
+        T.reportVariadicNotEquals = '(not (equal? <#1>))';
+        T.reportVariadicLessThan = '(< <#1>)';
+        T.reportVariadicLessThanOrEquals = '(<= <#1>)';
+        T.reportVariadicGreaterThan = '(> <#1>)';
+        T.reportVariadicGreaterThanOrEquals = '(>= <#1>)';
+        T.reportVariadicAnd = '(and <#1>)';
+        T.reportVariadicOr = '(or <#1>)';
+        T.reportVariadicIsIdentical = '(eq? <#1>)';
+        T.reportDifference = '(- <#1> <#2>)';
+        T.reportQuotient = '(/ <#1> <#2>)';
+        T.reportPower = '(expt <#1> <#2>)';
+        T.reportModulus = '(modulo <#1> <#2>)';
+        T.reportAtan2 = '(atan <#1> <#2>)';
+        T.reportRound = '(round <#1>)';
+        T.reportRandom = '(random <#1> (+ <#2> 1))';
+        T.doSayFor = '(displayln <#1>)';
+        T.bubble = '(displayln <#1>)';
+        T.doThinkFor = '(displayln <#1>)';
+        T.doThink = '(displayln <#1>)';
+        T.log = '(displayln <#1>)';
+        T.alert = '(displayln <#1>)';
+        T.doShowVar = '(displayln <#1>)';
+        T.doHideVar = '';
+        T.evaluate = '(<#1> <#2>)';
+        T.doRun = '(<#1> <#2>)';
     } else {
         // Java / Lua: keep snap helpers for list/index oddities
         T.reportListItem = 'snap.item(<#1>, <#2>)';
@@ -2067,24 +2178,65 @@ SnapCodifier.buildMappings = function () {
     T.reportFalse = p.boolFalse;
     T.reportPipe = 'snap.pipe(<#1>, <#2>)';
 
-    T.forward = 'snap.move(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    T.turn = 'snap.turn_right(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    T.turnLeft = 'snap.turn_left(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    T.setHeading = 'snap.point_in_direction(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    T.doFaceTowards = 'snap.point_towards(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    T.gotoXY = 'snap.go_to(<#1>, <#2>)' + (('cmd' === 'cmd') ? semi : '');
-    T.doGotoObject = 'snap.go_to(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    T.doGlide = 'snap.glide(<#1>, <#2>, <#3>)' + (('cmd' === 'cmd') ? semi : '');
-    T.changeXPosition = 'snap.change_x(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    T.setXPosition = 'snap.set_x(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    T.changeYPosition = 'snap.change_y(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    T.setYPosition = 'snap.set_y(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    T.bounceOffEdge = 'snap.if_on_edge_bounce()' + (('cmd' === 'cmd') ? semi : '');
-    T.getPosition = 'snap.position()' + (('rep' === 'cmd') ? semi : '');
-    T.xPosition = 'snap.x_position()' + (('rep' === 'cmd') ? semi : '');
-    T.yPosition = 'snap.y_position()' + (('rep' === 'cmd') ? semi : '');
-    T.direction = 'snap.direction';
-    if (lang !== 'python' && lang !== 'javascript') {
+    // Motion / pen: Python → stdlib turtle; Scheme → Logo-style turtle;
+    // other languages keep the snap.* helpers (no standard turtle).
+    if (lang === 'python') {
+        T.forward = 'turtle.forward(<#1>)';
+        T.turn = 'turtle.right(<#1>)';
+        T.turnLeft = 'turtle.left(<#1>)';
+        // Snap: 0° = up; turtle: 0° = east, CCW positive
+        T.setHeading = 'turtle.setheading(90 - (<#1>))';
+        T.doFaceTowards = 'snap.point_towards(<#1>)';
+        T.gotoXY = 'turtle.goto(<#1>, <#2>)';
+        T.doGotoObject = 'snap.go_to(<#1>)';
+        T.doGlide = 'turtle.goto(<#2>, <#3>)';
+        T.changeXPosition = 'turtle.setx(turtle.xcor() + (<#1>))';
+        T.setXPosition = 'turtle.setx(<#1>)';
+        T.changeYPosition = 'turtle.sety(turtle.ycor() + (<#1>))';
+        T.setYPosition = 'turtle.sety(<#1>)';
+        T.bounceOffEdge = 'snap.if_on_edge_bounce()';
+        T.getPosition = '[turtle.xcor(), turtle.ycor()]';
+        T.xPosition = 'turtle.xcor()';
+        T.yPosition = 'turtle.ycor()';
+        T.direction = '((90 - turtle.heading()) % 360)';
+    } else if (lang === 'scheme') {
+        T.forward = '(forward <#1>)';
+        T.turn = '(right <#1>)';
+        T.turnLeft = '(left <#1>)';
+        T.setHeading = '(set-heading <#1>)';
+        T.doFaceTowards = '(point-towards <#1>)';
+        T.gotoXY = '(go-to <#1> <#2>)';
+        T.doGotoObject = '(go-to <#1>)';
+        T.doGlide = '(go-to <#2> <#3>)';
+        T.changeXPosition = '(set-x (+ (x-position) <#1>))';
+        T.setXPosition = '(set-x <#1>)';
+        T.changeYPosition = '(set-y (+ (y-position) <#1>))';
+        T.setYPosition = '(set-y <#1>)';
+        T.bounceOffEdge = '(if-on-edge-bounce)';
+        T.getPosition = '(position)';
+        T.xPosition = '(x-position)';
+        T.yPosition = '(y-position)';
+        T.direction = '(heading)';
+    } else {
+        T.forward = 'snap.move(<#1>)' + semi;
+        T.turn = 'snap.turn_right(<#1>)' + semi;
+        T.turnLeft = 'snap.turn_left(<#1>)' + semi;
+        T.setHeading = 'snap.point_in_direction(<#1>)' + semi;
+        T.doFaceTowards = 'snap.point_towards(<#1>)' + semi;
+        T.gotoXY = 'snap.go_to(<#1>, <#2>)' + semi;
+        T.doGotoObject = 'snap.go_to(<#1>)' + semi;
+        T.doGlide = 'snap.glide(<#1>, <#2>, <#3>)' + semi;
+        T.changeXPosition = 'snap.change_x(<#1>)' + semi;
+        T.setXPosition = 'snap.set_x(<#1>)' + semi;
+        T.changeYPosition = 'snap.change_y(<#1>)' + semi;
+        T.setYPosition = 'snap.set_y(<#1>)' + semi;
+        T.bounceOffEdge = 'snap.if_on_edge_bounce()' + semi;
+        T.getPosition = 'snap.position()';
+        T.xPosition = 'snap.x_position()';
+        T.yPosition = 'snap.y_position()';
+        T.direction = 'snap.direction';
+    }
+    if (lang !== 'python' && lang !== 'javascript' && lang !== 'scheme') {
         T.doSayFor = 'snap.say(<#1>, <#2>)' + semi;
         T.bubble = 'snap.say(<#1>)' + semi;
         T.doThinkFor = 'snap.think(<#1>, <#2>)' + semi;
@@ -2105,47 +2257,82 @@ SnapCodifier.buildMappings = function () {
     T.reportShown = 'snap.is_shown()' + (('rep' === 'cmd') ? semi : '');
     T.goToLayer = 'snap.go_to_layer(<#1>)' + (('cmd' === 'cmd') ? semi : '');
     T.goBack = 'snap.go_back_layers(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    if (lang !== 'python' && lang !== 'javascript') {
+    if (lang !== 'python' && lang !== 'javascript' && lang !== 'scheme') {
         T.alert = 'snap.alert(<#1>)' + semi;
         T.log = 'snap.say(<#1>)' + semi;
     }
-    T.playSound = 'snap.play_sound(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    T.doPlaySoundUntilDone = 'snap.play_sound_until_done(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    T.doPlaySoundAtRate = 'snap.play_sound_at(<#1>, <#2>)' + (('cmd' === 'cmd') ? semi : '');
-    T.doStopAllSounds = 'snap.stop_all_sounds()' + (('cmd' === 'cmd') ? semi : '');
-    T.doRest = 'snap.rest(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    T.doPlayNote = 'snap.play_note(<#1>, <#2>)' + (('cmd' === 'cmd') ? semi : '');
-    T.doPlayFrequency = 'snap.play_frequency(<#1>, <#2>)' + (('cmd' === 'cmd') ? semi : '');
-    T.doSetInstrument = 'snap.set_instrument(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    T.doChangeTempo = 'snap.change_tempo(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    T.doSetTempo = 'snap.set_tempo(<#1>)' + (('cmd' === 'cmd') ? semi : '');
+    T.playSound = 'snap.play_sound(<#1>)' + semi;
+    T.doPlaySoundUntilDone = 'snap.play_sound_until_done(<#1>)' + semi;
+    T.doPlaySoundAtRate = 'snap.play_sound_at(<#1>, <#2>)' + semi;
+    T.doStopAllSounds = 'snap.stop_all_sounds()' + semi;
+    T.doRest = 'snap.rest(<#1>)' + semi;
+    T.doPlayNote = 'snap.play_note(<#1>, <#2>)' + semi;
+    T.doPlayFrequency = 'snap.play_frequency(<#1>, <#2>)' + semi;
+    T.doSetInstrument = 'snap.set_instrument(<#1>)' + semi;
+    T.doChangeTempo = 'snap.change_tempo(<#1>)' + semi;
+    T.doSetTempo = 'snap.set_tempo(<#1>)' + semi;
     T.getTempo = 'snap.tempo';
-    T.changeVolume = 'snap.change_volume(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    T.setVolume = 'snap.set_volume(<#1>)' + (('cmd' === 'cmd') ? semi : '');
+    T.changeVolume = 'snap.change_volume(<#1>)' + semi;
+    T.setVolume = 'snap.set_volume(<#1>)' + semi;
     T.getVolume = 'snap.volume';
-    T.changePan = 'snap.change_balance(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    T.setPan = 'snap.set_balance(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    T.getPan = 'snap.balance()' + (('rep' === 'cmd') ? semi : '');
-    T.playFreq = 'snap.play_frequency(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    T.stopFreq = 'snap.stop_frequency()' + (('cmd' === 'cmd') ? semi : '');
-    T.clear = 'snap.clear()' + (('cmd' === 'cmd') ? semi : '');
-    T.down = 'snap.pen_down_fn()' + (('cmd' === 'cmd') ? semi : '');
-    T.up = 'snap.pen_up()' + (('cmd' === 'cmd') ? semi : '');
-    T.getPenDown = 'snap.is_pen_down()' + (('rep' === 'cmd') ? semi : '');
-    T.setColor = 'snap.set_pen_color(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    T.setPenColorDimension = 'snap.set_pen_color(<#1>, <#2>)' + (('cmd' === 'cmd') ? semi : '');
-    T.changePenColorDimension = 'snap.set_pen_color(<#1>, <#2>)' + (('cmd' === 'cmd') ? semi : '');
-    T.getPenAttribute = 'snap.effect(<#1>)' + (('rep' === 'cmd') ? semi : '');
-    T.changeSize = 'snap.change_pen_size(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    T.setSize = 'snap.set_pen_size(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    T.doStamp = 'snap.stamp()' + (('cmd' === 'cmd') ? semi : '');
-    T.floodFill = 'snap.fill()' + (('cmd' === 'cmd') ? semi : '');
-    T.write = 'snap.write_pen(<#1>, <#2>)' + (('cmd' === 'cmd') ? semi : '');
-    T.doPasteOn = 'snap.paste_on(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    T.doCutFrom = 'snap.cut_from(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    T.doWait = 'snap.wait(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    T.doWaitUntil = 'snap.wait_until(<#1>)' + (('cmd' === 'cmd') ? semi : '');
-    T.doReport = (lang === 'javascript' || lang === 'java') ? 'return <#1>;' : 'return <#1>';
+    T.changePan = 'snap.change_balance(<#1>)' + semi;
+    T.setPan = 'snap.set_balance(<#1>)' + semi;
+    T.getPan = 'snap.balance()';
+    T.playFreq = 'snap.play_frequency(<#1>)' + semi;
+    T.stopFreq = 'snap.stop_frequency()' + semi;
+    if (lang === 'python') {
+        T.clear = 'turtle.clear()';
+        T.down = 'turtle.pendown()';
+        T.up = 'turtle.penup()';
+        T.getPenDown = 'turtle.isdown()';
+        T.setColor = 'turtle.pencolor(<#1>)';
+        T.setPenColorDimension = 'turtle.pencolor(<#1>)';
+        T.changePenColorDimension = 'turtle.pencolor(<#1>)';
+        T.getPenAttribute = 'turtle.pensize()';
+        T.changeSize = 'turtle.pensize(turtle.pensize() + (<#1>))';
+        T.setSize = 'turtle.pensize(<#1>)';
+        T.doStamp = 'turtle.stamp()';
+        T.floodFill = 'snap.fill()';
+        T.write = 'turtle.write(<#1>)';
+    } else if (lang === 'scheme') {
+        T.clear = '(clear)';
+        T.down = '(pen-down)';
+        T.up = '(pen-up)';
+        T.getPenDown = '(pen-down?)';
+        T.setColor = '(set-pen-color <#1>)';
+        T.setPenColorDimension = '(set-pen-color <#1>)';
+        T.changePenColorDimension = '(set-pen-color <#1>)';
+        T.getPenAttribute = '(pen-size)';
+        T.changeSize = '(set-pen-size (+ (pen-size) <#1>))';
+        T.setSize = '(set-pen-size <#1>)';
+        T.doStamp = '(stamp)';
+        T.floodFill = '(fill)';
+        T.write = '(turtle-write <#1>)';
+    } else {
+        T.clear = 'snap.clear()' + semi;
+        T.down = 'snap.pen_down_fn()' + semi;
+        T.up = 'snap.pen_up()' + semi;
+        T.getPenDown = 'snap.is_pen_down()';
+        T.setColor = 'snap.set_pen_color(<#1>)' + semi;
+        T.setPenColorDimension = 'snap.set_pen_color(<#1>, <#2>)' + semi;
+        T.changePenColorDimension = 'snap.set_pen_color(<#1>, <#2>)' + semi;
+        T.getPenAttribute = 'snap.effect(<#1>)';
+        T.changeSize = 'snap.change_pen_size(<#1>)' + semi;
+        T.setSize = 'snap.set_pen_size(<#1>)' + semi;
+        T.doStamp = 'snap.stamp()' + semi;
+        T.floodFill = 'snap.fill()' + semi;
+        T.write = 'snap.write_pen(<#1>, <#2>)' + semi;
+    }
+    T.doPasteOn = 'snap.paste_on(<#1>)' + semi;
+    T.doCutFrom = 'snap.cut_from(<#1>)' + semi;
+    T.doWait = 'snap.wait(<#1>)' + semi;
+    T.doWaitUntil = 'snap.wait_until(<#1>)' + semi;
+    if (lang === 'scheme') {
+        T.doReport = '<#1>';
+    } else {
+        T.doReport = (lang === 'javascript' || lang === 'java') ?
+            'return <#1>;' : 'return <#1>';
+    }
     T.doStopAll = 'snap.stop_all()' + (('cmd' === 'cmd') ? semi : '');
     T.createClone = 'snap.create_clone(<#1>)' + (('cmd' === 'cmd') ? semi : '');
     T.newClone = 'snap.new_clone(<#1>)' + (('rep' === 'cmd') ? semi : '');
@@ -2174,7 +2361,7 @@ SnapCodifier.buildMappings = function () {
     T.reportRelationTo = 'snap.relation(<#1>, <#2>)' + (('rep' === 'cmd') ? semi : '');
     T.reportAudio = 'snap.microphone(<#1>)' + (('rep' === 'cmd') ? semi : '');
     T.reportVideo = 'snap.video(<#1>, <#2>)' + (('rep' === 'cmd') ? semi : '');
-    if (lang !== 'python' && lang !== 'javascript') {
+    if (lang !== 'python' && lang !== 'javascript' && lang !== 'scheme') {
         T.doShowVar = 'snap.show_variable(<#1>)' + semi;
         T.doHideVar = 'snap.hide_variable(<#1>)' + semi;
     }
@@ -2182,17 +2369,22 @@ SnapCodifier.buildMappings = function () {
     T.reportAskFor = 'snap.ask_for(<#1>, <#2>, <#3>)';
     T.doSwitchToScene = 'snap.switch_scene(<#1>, <#2>)' + semi;
     T.reportHyperZip = 'snap.hyper_zip(<#1>, <#2>, <#3>, <#4>, <#5>, <#6>, <#7>)';
-    T.doSetVar = '<#1> = <#2>' + semi;
-    if (lang === 'java') {
-        T.doChangeVar = '<#1> = ((Number)<#1>).doubleValue() + ((Number)(<#2>)).doubleValue();';
-    } else if (lang === 'javascript') {
-        T.doChangeVar = '<#1> += <#2>;';
-    } else if (lang === 'python') {
-        T.doChangeVar = '<#1> += <#2>';
+    if (lang === 'scheme') {
+        T.doSetVar = '(set! <#1> <#2>)';
+        T.doChangeVar = '(set! <#1> (+ <#1> <#2>))';
     } else {
-        T.doChangeVar = '<#1> = (<#1>) + (<#2>)';
+        T.doSetVar = '<#1> = <#2>' + semi;
+        if (lang === 'java') {
+            T.doChangeVar = '<#1> = ((Number)<#1>).doubleValue() + ((Number)(<#2>)).doubleValue();';
+        } else if (lang === 'javascript') {
+            T.doChangeVar = '<#1> += <#2>;';
+        } else if (lang === 'python') {
+            T.doChangeVar = '<#1> += <#2>';
+        } else {
+            T.doChangeVar = '<#1> = (<#1>) + (<#2>)';
+        }
     }
-    if (lang !== 'python' && lang !== 'javascript') {
+    if (lang !== 'python' && lang !== 'javascript' && lang !== 'scheme') {
         T.evaluate = 'snap.call(<#1>, <#2>)';
         T.doRun = 'snap.run(<#1>, <#2>)' + semi;
     }
@@ -2429,6 +2621,20 @@ SnapCodifier.emptyOr = function (body) {
     return text ? body : this.profile().emptyBody;
 };
 
+// Wrap multi-statement Scheme bodies in (begin …)
+SnapCodifier.schemeBegin = function (body) {
+    var text = String(body || '').replace(/^\n+|\n+$/g, ''),
+        lines;
+    if (!text.trim()) {
+        return this.profile().emptyBody;
+    }
+    lines = text.split('\n');
+    if (lines.length === 1) {
+        return text.trim();
+    }
+    return '(begin\n' + lines.map(line => '  ' + line).join('\n') + ')';
+};
+
 // Special emitters: full control over Snap structural oddities
 SnapCodifier.specialEmitters = {
 
@@ -2516,6 +2722,14 @@ SnapCodifier.specialEmitters = {
                 b2 = this.emptyOr(this.mapInput(pairs[i + 1], defs));
                 code += '\nelif ' + c2 + ':\n' + this.indentBlock(b2, 4);
             }
+        } else if (lang === 'scheme') {
+            code = '(cond\n  (' + cond + '\n   ' + this.schemeBegin(body) + ')';
+            for (i = 0; i + 1 < pairs.length; i += 2) {
+                c2 = this.mapInput(pairs[i], defs);
+                b2 = this.emptyOr(this.mapInput(pairs[i + 1], defs));
+                code += '\n  (' + c2 + '\n   ' + this.schemeBegin(b2) + ')';
+            }
+            code += ')';
         } else if (lang === 'lua') {
             code = 'if ' + cond + ' then\n' + this.indentBlock(body, 4);
             for (i = 0; i + 1 < pairs.length; i += 2) {
@@ -2546,6 +2760,9 @@ SnapCodifier.specialEmitters = {
         if (lang === 'python') {
             code = 'if ' + cond + ':\n' + this.indentBlock(a, 4) +
                 '\nelse:\n' + this.indentBlock(b, 4);
+        } else if (lang === 'scheme') {
+            code = '(if ' + cond + '\n    ' + this.schemeBegin(a) +
+                '\n    ' + this.schemeBegin(b) + ')';
         } else if (lang === 'lua') {
             code = 'if ' + cond + ' then\n' + this.indentBlock(a, 4) +
                 '\nelse\n' + this.indentBlock(b, 4) + '\nend';
@@ -2565,6 +2782,9 @@ SnapCodifier.specialEmitters = {
         if (lang === 'python') {
             return '((' + a + ') if (' + c + ') else (' + b + '))';
         }
+        if (lang === 'scheme') {
+            return '(if ' + c + ' ' + a + ' ' + b + ')';
+        }
         if (lang === 'lua') {
             return '(((' + c + ') and (' + a + ')) or (' + b + '))';
         }
@@ -2577,6 +2797,9 @@ SnapCodifier.specialEmitters = {
             code;
         if (lang === 'python') {
             code = 'while True:\n' + this.indentBlock(body, 4);
+        } else if (lang === 'scheme') {
+            code = '(let loop ()\n  ' + this.schemeBegin(body) +
+                '\n  (loop))';
         } else if (lang === 'lua') {
             code = 'while true do\n' + this.indentBlock(body, 4) + '\nend';
         } else {
@@ -2593,6 +2816,9 @@ SnapCodifier.specialEmitters = {
         if (lang === 'python') {
             code = 'for _ in range(' + this.asIntExpr(n) + '):\n' +
                 this.indentBlock(body, 4);
+        } else if (lang === 'scheme') {
+            code = '(do ((_i 0 (+ _i 1)))\n    ((= _i ' + n + '))\n  ' +
+                this.schemeBegin(body) + ')';
         } else if (lang === 'lua') {
             code = 'for _ = 1, ' + n + ' do\n' + this.indentBlock(body, 4) + '\nend';
         } else if (lang === 'java') {
@@ -2612,6 +2838,9 @@ SnapCodifier.specialEmitters = {
             code;
         if (lang === 'python') {
             code = 'while not (' + cond + '):\n' + this.indentBlock(body, 4);
+        } else if (lang === 'scheme') {
+            code = '(do ()\n    (' + cond + ')\n  ' +
+                this.schemeBegin(body) + ')';
         } else if (lang === 'lua') {
             code = 'while not (' + cond + ') do\n' +
                 this.indentBlock(body, 4) + '\nend';
@@ -2632,6 +2861,9 @@ SnapCodifier.specialEmitters = {
         if (lang === 'python') {
             code = 'for ' + v + ' in range(' + this.asIntExpr(a) + ', ' +
                 this.asIntExpr(b) + ' + 1):\n' + this.indentBlock(body, 4);
+        } else if (lang === 'scheme') {
+            code = '(do ((' + v + ' ' + a + ' (+ ' + v + ' 1)))\n    ((> ' +
+                v + ' ' + b + '))\n  ' + this.schemeBegin(body) + ')';
         } else if (lang === 'lua') {
             code = 'for ' + v + ' = ' + a + ', ' + b + ' do\n' +
                 this.indentBlock(body, 4) + '\nend';
@@ -2659,6 +2891,9 @@ SnapCodifier.specialEmitters = {
             return 'Array.from({length: (' + b + ')-(' + a +
                 ')+1}, (_,i)=>(' + a + ')+i)';
         }
+        if (lang === 'scheme') {
+            return '(range ' + a + ' ' + b + ')';
+        }
         return 'snap.numbers(' + a + ', ' + b + ')';
     },
 
@@ -2674,6 +2909,9 @@ SnapCodifier.specialEmitters = {
             return '(' + a + ' + Math.floor(Math.random() * ((' + b +
                 ') - (' + a + ') + 1)))';
         }
+        if (lang === 'scheme') {
+            return '(+ ' + a + ' (random (+ (- ' + b + ' ' + a + ') 1)))';
+        }
         return 'snap.random(' + a + ', ' + b + ')';
     },
 
@@ -2686,6 +2924,9 @@ SnapCodifier.specialEmitters = {
         if (lang === 'python') {
             code = 'for ' + v + ' in ' + list + ':\n' +
                 this.indentBlock(body, 4);
+        } else if (lang === 'scheme') {
+            code = '(for-each\n  (lambda (' + v + ')\n    ' +
+                this.schemeBegin(body) + ')\n  ' + list + ')';
         } else if (lang === 'lua') {
             code = 'for _, ' + v + ' in ipairs(' + list + ') do\n' +
                 this.indentBlock(body, 4) + '\nend';
@@ -2742,6 +2983,9 @@ SnapCodifier.specialEmitters = {
             code = '(' + list + ').append(' + val + ')';
         } else if (lang === 'javascript') {
             code = '(' + list + ').push(' + val + ');';
+        } else if (lang === 'scheme') {
+            // Teaching helper: mutate list in place (pair / box list)
+            code = '(snap-add ' + val + ' ' + list + ')';
         } else {
             code = 'snap.add(' + val + ', ' + list + ')' + semi;
         }
@@ -2777,10 +3021,17 @@ SnapCodifier.specialEmitters = {
         return this.emitBuiltinCall(block, defs, 'max', 'max');
     },
     reportVariadicEquals: function (block, defs) {
+        if (this.language === 'scheme') {
+            return this.emitInfix(block, defs, 'equal?', 'equals');
+        }
         return this.emitInfix(block, defs,
             this.language === 'javascript' ? '===' : '==', 'equals');
     },
     reportVariadicNotEquals: function (block, defs) {
+        if (this.language === 'scheme') {
+            var eq = this.emitInfix(block, defs, 'equal?', 'equals');
+            return '(not ' + eq + ')';
+        }
         return this.emitInfix(block, defs,
             this.language === 'javascript' ? '!==' : '!=', 'not_equals');
     },
@@ -2798,17 +3049,22 @@ SnapCodifier.specialEmitters = {
     },
     reportVariadicAnd: function (block, defs) {
         return this.emitInfix(block, defs,
-            this.language === 'python' || this.language === 'lua' ? 'and' : '&&',
+            (this.language === 'python' || this.language === 'lua' ||
+                this.language === 'scheme') ? 'and' : '&&',
             'both');
     },
     reportVariadicOr: function (block, defs) {
         return this.emitInfix(block, defs,
-            this.language === 'python' || this.language === 'lua' ? 'or' : '||',
+            (this.language === 'python' || this.language === 'lua' ||
+                this.language === 'scheme') ? 'or' : '||',
             'either');
     },
     reportVariadicIsIdentical: function (block, defs) {
         if (this.language === 'python') {
             return this.emitInfix(block, defs, 'is', 'identical');
+        }
+        if (this.language === 'scheme') {
+            return this.emitInfix(block, defs, 'eq?', 'identical');
         }
         return this.emitInfix(block, defs, '===', 'identical');
     },
@@ -2817,7 +3073,7 @@ SnapCodifier.specialEmitters = {
         var args = this.variadicArgs(block, defs),
             lang = this.language;
         if (!args.length) {
-            return lang === 'python' ? '""' : (lang === 'lua' ? '""' : '""');
+            return '""';
         }
         if (lang === 'python') {
             if (args.length === 1) { return 'str(' + args[0] + ')'; }
@@ -2826,6 +3082,10 @@ SnapCodifier.specialEmitters = {
         if (lang === 'javascript') {
             return args.length === 1 ? 'String(' + args[0] + ')' :
                 '[' + args.join(', ') + '].join("")';
+        }
+        if (lang === 'scheme') {
+            return '(string-append ' +
+                args.map(a => '(format "~a" ' + a + ')').join(' ') + ')';
         }
         return this.emitVariadicCall(block, defs, 'join');
     },
@@ -2837,6 +3097,9 @@ SnapCodifier.specialEmitters = {
         if (this.language === 'java') {
             return 'java.util.List.of(' + args.join(', ') + ')';
         }
+        if (this.language === 'scheme') {
+            return args.length ? ('(list ' + args.join(' ') + ')') : "'()";
+        }
         return '[' + args.join(', ') + ']';
     },
     reportConcatenatedLists: function (block, defs) {
@@ -2847,6 +3110,9 @@ SnapCodifier.specialEmitters = {
         }
         if (lang === 'javascript') {
             return '[].concat(' + args.join(', ') + ')';
+        }
+        if (lang === 'scheme') {
+            return args.length ? ('(append ' + args.join(' ') + ')') : "'()";
         }
         return this.emitVariadicCall(block, defs, 'append_lists');
     },
@@ -2905,6 +3171,29 @@ SnapCodifier.specialEmitters = {
             };
             return table[key] || ('snap.monadic(' + this.quote(key) + ', ' + n + ')');
         }
+        if (lang === 'scheme') {
+            table = {
+                abs: '(abs ' + n + ')',
+                neg: '(- ' + n + ')',
+                ceiling: '(ceiling ' + n + ')',
+                floor: '(floor ' + n + ')',
+                sqrt: '(sqrt ' + n + ')',
+                sin: '(sin ' + n + ')',
+                cos: '(cos ' + n + ')',
+                tan: '(tan ' + n + ')',
+                asin: '(asin ' + n + ')',
+                acos: '(acos ' + n + ')',
+                atan: '(atan ' + n + ')',
+                ln: '(log ' + n + ')',
+                log: '(/ (log ' + n + ') (log 10))',
+                'e^': '(exp ' + n + ')',
+                '10^': '(expt 10 ' + n + ')',
+                '2^': '(expt 2 ' + n + ')',
+                id: n,
+                round: '(round ' + n + ')'
+            };
+            return table[key] || ('(snap-monadic ' + this.quote(key) + ' ' + n + ')');
+        }
         return 'snap.monadic(' + this.quote(key) + ', ' + n + ')';
     },
 
@@ -2930,6 +3219,12 @@ SnapCodifier.specialEmitters = {
             if (key === 'list') { return 'isinstance(' + v + ', list)'; }
             if (key === 'boolean') { return 'isinstance(' + v + ', bool)'; }
         }
+        if (lang === 'scheme') {
+            if (key === 'number') { return '(number? ' + v + ')'; }
+            if (key === 'text') { return '(string? ' + v + ')'; }
+            if (key === 'list') { return '(list? ' + v + ')'; }
+            if (key === 'boolean') { return '(boolean? ' + v + ')'; }
+        }
         return 'snap.is_a(' + v + ', ' + this.quote(key) + ')';
     },
 
@@ -2943,6 +3238,9 @@ SnapCodifier.specialEmitters = {
         if (lang === 'javascript') {
             return 'String(' + text + ').split(' + delim + ')';
         }
+        if (lang === 'scheme') {
+            return '(snap-split ' + text + ' ' + delim + ')';
+        }
         return 'snap.split(' + text + ', ' + delim + ')';
     },
 
@@ -2954,6 +3252,7 @@ SnapCodifier.specialEmitters = {
         if (String(key) === 'length' || !key) {
             if (lang === 'python') { return 'len(' + list + ')'; }
             if (lang === 'javascript') { return '(' + list + ').length'; }
+            if (lang === 'scheme') { return '(length ' + list + ')'; }
         }
         return 'snap.list_attribute(' + this.quote(key) + ', ' + list + ')';
     },
@@ -2962,6 +3261,9 @@ SnapCodifier.specialEmitters = {
             lang = this.language;
         if (lang === 'python') { return 'len(str(' + text + '))'; }
         if (lang === 'javascript') { return 'String(' + text + ').length'; }
+        if (lang === 'scheme') {
+            return '(string-length (format "~a" ' + text + '))';
+        }
         return 'snap.text_attribute("length", ' + text + ')';
     },
 
@@ -2982,6 +3284,8 @@ SnapCodifier.specialEmitters = {
             code = 'let ' + names.join(', ') + ';';
         } else if (lang === 'java') {
             code = names.map(n => 'Object ' + n + ' = null;').join('\n');
+        } else if (lang === 'scheme') {
+            code = names.map(n => '(define ' + n + ' #f)').join('\n');
         } else {
             code = 'local ' + names.join(', ');
         }
@@ -2995,8 +3299,11 @@ SnapCodifier.specialEmitters = {
             code;
         key = String(key || 'this script');
         if (key === 'all' || key.indexOf('all') !== -1) {
-            code = lang === 'javascript' || lang === 'java' ?
-                'snap.stop_all();' : 'snap.stop_all()';
+            code = lang === 'scheme' ? '(snap-stop-all)' :
+                (lang === 'javascript' || lang === 'java' ?
+                    'snap.stop_all();' : 'snap.stop_all()');
+        } else if (lang === 'scheme') {
+            code = "'()";
         } else if (lang === 'javascript' || lang === 'java') {
             code = 'return;';
         } else {
@@ -3030,8 +3337,15 @@ SnapCodifier.specialEmitters = {
             return '(' + list + ').find((' + parts.param + ') => (' +
                 parts.body + '))';
         }
+        if (lang === 'scheme' && parts) {
+            return '(findf (lambda (' + parts.param + ') ' + parts.body +
+                ') ' + list + ')';
+        }
         if (lang === 'javascript') {
             return '(' + list + ').find(' + this.mapInput(ring, defs) + ')';
+        }
+        if (lang === 'scheme') {
+            return '(findf ' + this.mapInput(ring, defs) + ' ' + list + ')';
         }
         return 'snap.find_first(' + this.mapInput(ring, defs) + ', ' + list + ')';
     },
@@ -3055,6 +3369,10 @@ SnapCodifier.specialEmitters = {
                 return '(' + list + ').reduce((' + parts.parms.join(', ') +
                     ') => ' + parts.body + ')';
             }
+            if (lang === 'scheme') {
+                return '(foldl (lambda (' + parts.parms.join(' ') + ') ' +
+                    parts.body + ') (car ' + list + ') (cdr ' + list + '))';
+            }
         }
         ring = this.mapInput(ringMorph, defs);
         if (lang === 'python') {
@@ -3062,6 +3380,9 @@ SnapCodifier.specialEmitters = {
         }
         if (lang === 'javascript') {
             return '(' + list + ').reduce(' + ring + ')';
+        }
+        if (lang === 'scheme') {
+            return '(foldl ' + ring + ' (car ' + list + ') (cdr ' + list + '))';
         }
         return 'snap.combine(' + list + ', ' + ring + ')';
     },
@@ -3075,7 +3396,9 @@ SnapCodifier.specialEmitters = {
             args = this.variadicArgsFrom(block.inputs()[1], defs),
             call,
             lang = this.language;
-        if (lang === 'python' || lang === 'javascript') {
+        if (lang === 'scheme') {
+            call = '(' + [ring].concat(args).join(' ') + ')';
+        } else if (lang === 'python' || lang === 'javascript') {
             call = ring + '(' + args.join(', ') + ')' + semi;
         } else {
             call = 'snap.run(' + [ring].concat(args).join(', ') + ')' + semi;
@@ -3086,13 +3409,18 @@ SnapCodifier.specialEmitters = {
         var semi = (this.language === 'javascript' || this.language === 'java') ? ';' : '',
             ring = this.mapInput(block.inputs()[0], defs),
             args = this.variadicArgsFrom(block.inputs()[1], defs),
-            call = 'snap.launch(' + [ring].concat(args).join(', ') + ')' + semi;
+            call = this.language === 'scheme' ?
+                '(snap-launch ' + [ring].concat(args).join(' ') + ')' :
+                ('snap.launch(' + [ring].concat(args).join(', ') + ')' + semi);
         return this.appendNext(block, defs, call);
     },
     evaluate: function (block, defs) {
         var ring = this.mapInput(block.inputs()[0], defs),
             args = this.variadicArgsFrom(block.inputs()[1], defs),
             lang = this.language;
+        if (lang === 'scheme') {
+            return '(' + [ring].concat(args).join(' ') + ')';
+        }
         if (lang === 'python' || lang === 'javascript') {
             return ring + '(' + args.join(', ') + ')';
         }
@@ -3147,14 +3475,18 @@ SnapCodifier.emitInfix = function (block, defs, op, snapFn) {
     var args = this.variadicArgs(block, defs),
         lang = this.language;
     if (!args.length) {
-        return lang === 'python' ? 'None' : 'null';
+        return lang === 'python' ? 'None' :
+            (lang === 'scheme' ? "'()" : 'null');
     }
     if (args.length === 1) {
         return '(' + args[0] + ')';
     }
-    // Idiomatic infix for Python / JS / Lua; Java falls back to snap.*
+    // Scheme uses prefix: (+ a b c). Java falls back to snap.*
     if (lang === 'java') {
         return this.emitVariadicCall(block, defs, snapFn);
+    }
+    if (lang === 'scheme') {
+        return '(' + op + ' ' + args.join(' ') + ')';
     }
     return '(' + args.join(' ' + op + ' ') + ')';
 };
@@ -3167,6 +3499,9 @@ SnapCodifier.emitBuiltinCall = function (block, defs, pyName, snapFn) {
     }
     if (lang === 'javascript') {
         return 'Math.' + pyName + '(' + args.join(', ') + ')';
+    }
+    if (lang === 'scheme') {
+        return '(' + pyName + ' ' + args.join(' ') + ')';
     }
     return this.emitVariadicCall(block, defs, snapFn);
 };
@@ -3330,6 +3665,8 @@ SnapCodifier.emitPrint = function (block, defs) {
         code = 'console.log(' + msg + ');';
     } else if (lang === 'lua') {
         code = 'print(' + msg + ')';
+    } else if (lang === 'scheme') {
+        code = '(displayln ' + msg + ')';
     } else {
         code = 'System.out.println(' + msg + ');';
     }
@@ -3360,12 +3697,25 @@ SnapCodifier.emitMapKeep = function (block, defs, kind) {
             return '(' + list + ').filter((' + parts.param + ') => (' +
                 parts.body + '))';
         }
+        if (lang === 'scheme') {
+            if (kind === 'map') {
+                return '(map (lambda (' + parts.param + ') ' + parts.body +
+                    ') ' + list + ')';
+            }
+            return '(filter (lambda (' + parts.param + ') ' + parts.body +
+                ') ' + list + ')';
+        }
     }
     ringCode = this.mapInput(ring, defs);
     if (lang === 'javascript') {
         return kind === 'map' ?
             '(' + list + ').map(' + ringCode + ')' :
             '(' + list + ').filter(' + ringCode + ')';
+    }
+    if (lang === 'scheme') {
+        return kind === 'map' ?
+            ('(map ' + ringCode + ' ' + list + ')') :
+            ('(filter ' + ringCode + ' ' + list + ')');
     }
     return kind === 'map' ?
         ('snap.map(' + ringCode + ', ' + list + ')') :
@@ -3398,7 +3748,7 @@ SnapCodifier.emitRing = function (block, defs, kind) {
     if (kind === 'script') {
         body = this.emptyOr(body);
     }
-    paramList = parms.join(', ');
+    paramList = parms.join(lang === 'scheme' ? ' ' : ', ');
 
     if (lang === 'python') {
         if (kind === 'script') {
@@ -3421,6 +3771,13 @@ SnapCodifier.emitRing = function (block, defs, kind) {
                 this.indentBlock(body, 4) + '\n})';
         } else {
             code = '((' + paramList + ') -> (' + body + '))';
+        }
+    } else if (lang === 'scheme') {
+        if (kind === 'script') {
+            code = '(lambda (' + paramList + ')\n  ' +
+                this.schemeBegin(body) + ')';
+        } else {
+            code = '(lambda (' + paramList + ') ' + body + ')';
         }
     } else { // lua
         if (kind === 'script') {
@@ -3456,10 +3813,15 @@ SnapCodifier.functionSignature = function (definition) {
     if (!callArgs.length && params.length) {
         callArgs = params.map((_, idx) => '<#' + (idx + 1) + '>');
     }
-    call = name + '(' + callArgs.join(', ') + ')';
-    if (!empty && definition.type === 'command' &&
-            (lang === 'javascript' || lang === 'java')) {
-        call = call + ';';
+    if (lang === 'scheme') {
+        call = '(' + name +
+            (callArgs.length ? (' ' + callArgs.join(' ')) : '') + ')';
+    } else {
+        call = name + '(' + callArgs.join(', ') + ')';
+        if (!empty && definition.type === 'command' &&
+                (lang === 'javascript' || lang === 'java')) {
+            call = call + ';';
+        }
     }
 
     if (lang === 'python') {
@@ -3479,6 +3841,14 @@ SnapCodifier.functionSignature = function (definition) {
             ('public static Object ' + name + '(' +
                 params.map(n => 'Object ' + n).join(', ') +
                 ') {\n    <body>\n}');
+    } else if (lang === 'scheme') {
+        header = empty ?
+            ('(define (' + name +
+                (paramList ? (' ' + params.join(' ')) : '') +
+                ')\n  ' + p.emptyBody + ')') :
+            ('(define (' + name +
+                (paramList ? (' ' + params.join(' ')) : '') +
+                ')\n  <body>)');
     } else {
         header = empty ?
             ('function ' + name + '(' + paramList + ')\n    ' +
@@ -3809,10 +4179,25 @@ SnapCodifier.titleLine = function () {
     return p.comment + ' ' + p.label + ' from your Snap! blocks';
 };
 
-SnapCodifier.studentImports = function () {
+SnapCodifier.studentImports = function (body) {
     // Small stdlib imports so idiomatic output runs without the snap helpers.
+    var text = String(body || ''),
+        lines;
     if (this.language === 'python') {
-        return 'import math\nimport random\nfrom functools import reduce\n';
+        lines = [
+            'import math',
+            'import random',
+            'from functools import reduce'
+        ];
+        // Only pull in turtle when motion/pen blocks were translated to it.
+        if (/\bturtle\./.test(text)) {
+            lines.push('import turtle');
+        }
+        return lines.join('\n') + '\n';
+    }
+    if (this.language === 'scheme' &&
+            /\((forward|right|left|pen-up|pen-down|clear|go-to|set-heading|set-pen-)/.test(text)) {
+        return '; Logo-style turtle helpers (forward, right, pen-down, …)\n';
     }
     return '';
 };
@@ -3895,7 +4280,7 @@ SnapCodifier.generate = function (ide, options) {
             return out;
         }
 
-        var imports = myself.studentImports();
+        var imports = myself.studentImports(body);
         if (imports) {
             out += imports + '\n';
         }
